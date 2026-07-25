@@ -88,6 +88,11 @@ const courseAllowedOn = (course: Course, iso: string): boolean => {
   if (!rule || rule.length === 0) return true;
   return rule.includes(weekdayOf(iso));
 };
+const courseAllowedSlot = (course: Course, slotIdx: number): boolean => {
+  const rule = course.allowedSlots;
+  if (!rule || rule.length === 0) return true;
+  return rule.includes(slotIdx);
+};
 
 const parseHM = (s: string): number => {
   const [h, m] = s.split(":").map((x) => parseInt(x, 10));
