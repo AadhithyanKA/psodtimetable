@@ -460,6 +460,21 @@ function Index() {
     });
   };
 
+  const clearTimetable = () => {
+    if (!confirm("Clear every course assignment from all classes? Breaks and blocked slots will stay.")) return;
+    setState((s) => ({
+      ...s,
+      classes: s.classes.map((cls) => {
+        const grid: Record<string, Cell> = {};
+        Object.entries(cls.grid).forEach(([key, cell]) => {
+          if (cell.kind !== "course") grid[key] = cell;
+        });
+        return { ...cls, grid };
+      }),
+    }));
+    setAutoFillReport("Timetable cleared — course assignments removed.");
+  };
+
   const onCellMouseDown = (date: string, slotIdx: number, e: React.MouseEvent) => {
     if (state.slots[slotIdx]?.isBreak) { e.preventDefault(); return; }
     // Alt + right-click erases immediately
@@ -1635,6 +1650,13 @@ function Index() {
                   e.target.value = "";
                 }}
               />
+              <button
+                onClick={clearTimetable}
+                className="border-2 border-red-700 bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-red-700 transition-transform hover:bg-red-50 active:translate-y-0.5"
+                title="Clear all course assignments"
+              >
+                Clear
+              </button>
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
