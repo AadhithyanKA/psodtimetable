@@ -371,6 +371,8 @@ function Index() {
   const [bulkAllClasses, setBulkAllClasses] = useState(false);
   const [autoFillReport, setAutoFillReport] = useState<string>("");
   const [pendingScrollClassId, setPendingScrollClassId] = useState<string | null>(null);
+  const [pendingBlockCsv, setPendingBlockCsv] = useState<{ name: string; text: string } | null>(null);
+  const [blockReport, setBlockReport] = useState<string>("");
   const gridRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1216,10 +1218,9 @@ function Index() {
     return out.map((v) => v.trim());
   };
 
-  const importBlockCsv = async (file: File) => {
-    const text = await file.text();
+  const applyBlockCsv = (text: string) => {
     const rawLines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
-    if (rawLines.length === 0) { alert("CSV is empty."); return; }
+    if (rawLines.length === 0) { setBlockReport("CSV is empty."); return; }
     const header = parseCsvRow(rawLines[0]).map((c) => c.toLowerCase());
     const dateIdx = header.indexOf("date");
     const periodsIdx = (() => {
@@ -1231,7 +1232,7 @@ function Index() {
       return i >= 0 ? i : header.indexOf("label");
     })();
     const scopeIdx = header.indexOf("scope");
-    if (dateIdx < 0) { alert("CSV missing required 'date' column."); return; }
+    if (dateIdx < 0) { setBlockReport("CSV missing required 'date' column."); return; }
 
     const normalizeDate = (raw: string): string => {
       const s = (raw || "").trim();
@@ -1293,9 +1294,9 @@ function Index() {
     const msg =
       `Applied ${applied} blocked cells.` +
       (skipped ? ` Skipped ${skipped} row(s).` : "") +
-      (extras.length ? `\n\n${extras.join("\n")}` : "") +
-      (errors.length ? `\n\n${errors.slice(0, 8).join("\n")}` : "");
-    alert(msg);
+      (extras.length ? ` ${extras.join(" ")}` : "") +
+      (errors.length ? ` ${errors.slice(0, 4).join(" | ")}` : "");
+    setBlockReport(msg);
   };
 
   // Export
@@ -1969,17 +1970,47 @@ function Index() {
                       type="file"
                       accept=".csv,text/csv"
                       className="hidden"
-                      onChange={(e) => {
+                      onChange={async (e) => {
                         const f = e.target.files?.[0];
-                        if (f) importBlockCsv(f);
+                        if (f) {
+                          const text = await f.text();
+                          setPendingBlockCsv({ name: f.name, text });
+                          setBlockReport(`Loaded "${f.name}". Click Block to apply.`);
+                        }
                         e.target.value = "";
                       }}
                     />
                   </label>
+                  <button
+                    onClick={() => {
+                      if (!pendingBlockCsv) { setBlockReport("Upload a CSV first."); return; }
+                      applyBlockCsv(pendingBlockCsv.text);
+                    }}
+                    disabled={!pendingBlockCsv}
+                    className="border border-[#0d0d0d] bg-rose-300 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Block
+                  </button>
+                  {pendingBlockCsv && (
+                    <button
+                      onClick={() => { setPendingBlockCsv(null); setBlockReport(""); }}
+                      className="border border-[#0d0d0d]/60 bg-white px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
+                    >
+                      Clear
+                    </button>
+                  )}
                 </div>
+                {pendingBlockCsv && (
+                  <p className="mt-2 text-[10px] font-bold text-[#2d2d2d]/80">
+                    Loaded: <code>{pendingBlockCsv.name}</code>
+                  </p>
+                )}
+                {blockReport && (
+                  <p className="mt-2 whitespace-pre-wrap text-[10px] text-[#2d2d2d]/80">{blockReport}</p>
+                )}
                 <p className="mt-2 text-[10px] text-[#2d2d2d]/60">
-                  Columns: <code>date, periods, label, scope</code>. Periods are 1-based
-                  over non-break slots (e.g. <code>1,2</code> or <code>5-8</code> or <code>all</code>).
+                  Columns: <code>date, Reason, Session</code>. Date is <code>DD/MM/YYYY</code>.
+                  Session is <code>all</code> or period numbers like <code>1,3,5,6</code>.
                 </p>
               </div>
             </section>
