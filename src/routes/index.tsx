@@ -561,14 +561,10 @@ function Index() {
             let target = course.weeklyPeriods ?? 0;
             const availableDays = weekDates.filter((d) => courseAllowedOn(course, d)).length;
             const cap = availableDays * starts.length;
-            if (opts.strictRules) {
-              // Strict mode uses the course's rule periods. If no specific periods are selected,
-              // "All periods" means every non-break period. If /wk is 0, fill every allowed
-              // day × rule-period opportunity, capped by the actual available starts.
-              if (starts.length === 0) return;
+            if (cap > 0) {
+              // If /wk is 0 or missing, use every allowed weekday × allowed-period opportunity.
+              // This keeps added courses eligible even when the weekly target field is untouched.
               target = target > 0 ? Math.min(target, cap) : cap;
-            } else if (cap > 0) {
-              target = Math.min(target, cap);
             }
             if (target <= 0) return;
             totalTarget += target;
@@ -635,27 +631,23 @@ function Index() {
         });
       });
 
-      // Diagnostic feedback so the user knows why nothing happened
+      // Diagnostic feedback stays on screen instead of blocking with popups.
       queueMicrotask(() => {
         const mode = opts.strictRules ? "Fill by Rules" : opts.overwrite ? "Regenerate" : "Fill Empty";
-        setAutoFillReport(`${mode}: placed ${placedCount} of ${totalTarget} planned sessions.`);
         if (totalTarget === 0) {
-          alert(
-            opts.strictRules
-              ? "Nothing to auto-fill.\n\nNo valid dates, courses, or non-break periods were found in the current timetable state. Your selected rules are accepted; please check the From/To date range and that the class has courses."
-              : "Nothing to auto-fill.\n\nSet a weekly target (the /wk field) on at least one course. Currently every course has weekly = 0.",
+          setAutoFillReport(
+            `${mode}: no eligible sessions found. Check the date range, courses, and non-break periods.`,
           );
         } else if (placedCount === 0) {
-          alert(
-            opts.strictRules
-              ? "Auto-fill couldn't place anything.\n\nCheck that selected periods match the selected weekdays and that the cells are empty. If the timetable already has entries, use Regenerate by Rules."
-              : "Auto-fill couldn't place anything.\n\nCheck: date range, course rules (allowed days/periods), and that empty slots exist (or use Regenerate).",
+          setAutoFillReport(
+            `${mode}: 0 of ${totalTarget} placed. Use Regen Rules if cells are already filled or blocked.`,
           );
         } else if (unmet.length > 0) {
-          alert(
-            `Placed ${placedCount} sessions.\n\nCouldn't fully satisfy:\n` +
-              unmet.slice(0, 10).join("\n"),
+          setAutoFillReport(
+            `${mode}: placed ${placedCount} of ${totalTarget}. Remaining: ${unmet.slice(0, 3).join("; ")}`,
           );
+        } else {
+          setAutoFillReport(`${mode}: placed ${placedCount} of ${totalTarget} planned sessions.`);
         }
       });
 
