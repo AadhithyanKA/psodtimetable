@@ -1140,6 +1140,13 @@ function Index() {
                   Regenerate
                 </button>
               </div>
+              <button
+                onClick={() => autoPopulate({ overwrite: false, strictRules: true })}
+                className="mb-3 w-full border-2 border-[#0d0d0d] bg-amber-200 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-amber-300"
+                title="Only places each course in the exact periods you set in its Rules, capped by /wk."
+              >
+                Fill by Rules (exact periods)
+              </button>
 
               <div className="border-t border-dashed border-[#0d0d0d]/30 pt-3">
                 <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/60">
