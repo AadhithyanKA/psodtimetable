@@ -36,6 +36,9 @@ type State = {
   fromDate: string; // YYYY-MM-DD
   toDate: string;
   slots: string[]; // column labels
+  startTime: string; // "HH:MM" 24h
+  endTime: string; // "HH:MM" 24h
+  slotMinutes: number; // duration of one slot
   courses: Course[];
   classes: ClassData[];
 };
@@ -70,13 +73,37 @@ const dayLabel = (iso: string) => {
   };
 };
 
+const parseHM = (s: string): number => {
+  const [h, m] = s.split(":").map((x) => parseInt(x, 10));
+  if (Number.isNaN(h) || Number.isNaN(m)) return 0;
+  return h * 60 + m;
+};
+const to12h = (mins: number): string => {
+  const total = ((mins % (24 * 60)) + 24 * 60) % (24 * 60);
+  const h24 = Math.floor(total / 60);
+  const m = total % 60;
+  const period = h24 >= 12 ? "PM" : "AM";
+  const h = ((h24 + 11) % 12) + 1;
+  return `${h}:${String(m).padStart(2, "0")} ${period}`;
+};
+const buildSlots = (start: string, end: string, dur: number): string[] => {
+  const s = parseHM(start);
+  const e = parseHM(end);
+  if (!(dur > 0) || e <= s) return [];
+  const out: string[] = [];
+  for (let t = s; t + dur <= e; t += dur) {
+    out.push(`${to12h(t)} – ${to12h(t + dur)}`);
+  }
+  return out;
+};
+
 function defaultState(): State {
   const from = isoToday();
   const to = addDays(from, 4);
-  const slots = [
-    "09:00-10:00", "10:00-11:00", "11:00-12:00",
-    "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00",
-  ];
+  const startTime = "09:00";
+  const endTime = "17:00";
+  const slotMinutes = 60;
+  const slots = buildSlots(startTime, endTime, slotMinutes);
   const courses: Course[] = [
     { id: "c1", name: "Mathematics", faculty: "Dr. Smith", color: COLORS[0], durationSlots: 1 },
     { id: "c2", name: "Physics", faculty: "Dr. Jones", color: COLORS[2], durationSlots: 1 },
@@ -86,6 +113,9 @@ function defaultState(): State {
   return {
     fromDate: from,
     toDate: to,
+    startTime,
+    endTime,
+    slotMinutes,
     slots,
     courses,
     classes: [
