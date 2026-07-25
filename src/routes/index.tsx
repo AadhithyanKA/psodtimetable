@@ -246,6 +246,7 @@ function Index() {
         for (let k = 0; k < span; k++) {
           const idx = slotIdx + k;
           if (idx >= s.slots.length) break;
+          if (s.slots[idx].isBreak) continue; // never write into break slots
           const key = `${date}-${idx}`;
           if (tool.kind === "erase") delete grid[key];
           else if (tool.kind === "break") grid[key] = { kind: "break", label: "Break" };
@@ -278,6 +279,7 @@ function Index() {
           targetDates.forEach((date) => {
             s.slots.forEach((_, i) => {
               if (!sSet.has(i)) return;
+              if (s.slots[i].isBreak) return;
               const key = `${date}-${i}`;
               if (kind === "erase") delete grid[key];
               else if (kind === "break") grid[key] = { kind: "break", label: "Break" };
