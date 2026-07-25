@@ -443,122 +443,127 @@ function Index() {
   const hasConflicts = conflicts.size > 0;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900" onMouseLeave={() => setIsPainting(false)}>
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-3 px-6 py-4">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Timetable Maker</h1>
-            <p className="text-sm text-slate-500">
-              Click a slot to pick a course, then click or click-drag to paint. Alt + right-click to erase. Right-click to change tool.
+    <div
+      className="min-h-screen w-full bg-[#f5f3ee] text-[#2d2d2d]"
+      style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}
+      onMouseLeave={() => setIsPainting(false)}
+    >
+      <div className="mx-auto flex min-h-screen w-full max-w-[1500px] flex-col md:flex-row md:border-x-2 md:border-[#0d0d0d]">
+        {/* Sidebar */}
+        <aside className="w-full shrink-0 border-b-2 border-[#0d0d0d] bg-[#e8e4dd] md:w-[320px] md:border-b-0 md:border-r-2">
+          <div className="border-b border-[#0d0d0d]/10 bg-[#0d0d0d] px-6 py-5 text-[#f5f3ee]">
+            <h1
+              className="text-xl font-bold tracking-tight"
+              style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+            >
+              Timetable Maker
+            </h1>
+            <p className="mt-1 text-[11px] uppercase tracking-[0.2em] text-[#f5f3ee]/60">
+              Modular · Weekly · Editorial
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
-              From
-              <input
-                type="date"
-                value={state.fromDate}
-                onChange={(e) => setState((s) => ({ ...s, fromDate: e.target.value }))}
-                className="rounded border border-slate-300 px-2 py-1 text-sm"
-              />
-            </label>
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
-              To
-              <input
-                type="date"
-                value={state.toDate}
-                onChange={(e) => setState((s) => ({ ...s, toDate: e.target.value }))}
-                className="rounded border border-slate-300 px-2 py-1 text-sm"
-              />
-            </label>
-            <button
-              onClick={exportCSV}
-              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-100"
-            >
-              Export CSV
-            </button>
-            <button
-              onClick={exportExcel}
-              className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
-            >
-              Export Excel
-            </button>
-          </div>
-        </div>
-      </header>
 
-      <main className="mx-auto grid max-w-[1400px] gap-6 px-6 py-6 lg:grid-cols-[280px_1fr]">
-        <aside className="space-y-4">
-          <section className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Classes</h2>
-              <button onClick={addClass} className="rounded bg-slate-900 px-2 py-1 text-xs text-white hover:bg-slate-800">
-                + Add
-              </button>
-            </div>
-            <div className="space-y-2">
-              {state.classes.map((cls) => (
-                <div key={cls.id} className="flex items-center gap-1">
-                  <button
-                    onClick={() => setActiveClassId(cls.id)}
-                    className={`flex-1 rounded-md border px-2 py-2 text-left text-sm ${
-                      cls.id === activeClassId
-                        ? "border-slate-900 bg-slate-900 text-white"
-                        : "border-slate-200 bg-white hover:bg-slate-50"
-                    }`}
-                  >
-                    <input
-                      value={cls.name}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => renameClass(cls.id, e.target.value)}
-                      className={`w-full bg-transparent outline-none ${
-                        cls.id === activeClassId ? "text-white" : ""
-                      }`}
-                    />
-                  </button>
-                  {state.classes.length > 1 && (
-                    <button
-                      onClick={() => removeClass(cls.id)}
-                      className="rounded px-2 py-1 text-xs text-slate-400 hover:bg-red-50 hover:text-red-600"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Courses</h2>
-              <button onClick={addCourse} className="rounded bg-slate-900 px-2 py-1 text-xs text-white hover:bg-slate-800">
-                + Add
-              </button>
-            </div>
-            <div className="space-y-2">
-              {state.courses.map((c) => (
-                <div
-                  key={c.id}
-                  className="rounded-md border border-slate-200 p-2"
-                  style={{ borderLeftWidth: 4, borderLeftColor: c.color }}
+          <div className="space-y-8 p-5">
+            {/* Classes */}
+            <section>
+              <div className="mb-3 flex items-center justify-between">
+                <h3
+                  className="text-[11px] font-bold uppercase tracking-widest text-[#0d0d0d]"
+                  style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
                 >
-                  <div className="flex items-start gap-1">
-                    <div className="flex-1 space-y-1">
+                  Classes
+                </h3>
+                <button
+                  onClick={addClass}
+                  className="border border-[#0d0d0d] bg-[#f5f3ee] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider hover:bg-[#0d0d0d] hover:text-[#f5f3ee]"
+                >
+                  + Add
+                </button>
+              </div>
+              <div className="space-y-2">
+                {state.classes.map((cls) => {
+                  const active = cls.id === activeClassId;
+                  return (
+                    <div key={cls.id} className="flex items-stretch gap-1">
+                      <button
+                        onClick={() => setActiveClassId(cls.id)}
+                        className={`flex-1 border px-3 py-2 text-left text-sm ${
+                          active
+                            ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
+                            : "border-[#0d0d0d]/20 bg-white hover:border-[#0d0d0d]"
+                        }`}
+                      >
+                        <input
+                          value={cls.name}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => renameClass(cls.id, e.target.value)}
+                          className="w-full bg-transparent font-semibold outline-none"
+                        />
+                      </button>
+                      {state.classes.length > 1 && (
+                        <button
+                          onClick={() => removeClass(cls.id)}
+                          className="border border-[#0d0d0d]/20 bg-white px-2 text-xs text-[#2d2d2d]/50 hover:border-red-500 hover:text-red-600"
+                          aria-label="Remove class"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            {/* Courses */}
+            <section>
+              <div className="mb-3 flex items-center justify-between">
+                <h3
+                  className="text-[11px] font-bold uppercase tracking-widest text-[#0d0d0d]"
+                  style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                >
+                  Courses
+                </h3>
+                <button
+                  onClick={addCourse}
+                  className="border border-[#0d0d0d] bg-[#f5f3ee] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider hover:bg-[#0d0d0d] hover:text-[#f5f3ee]"
+                >
+                  + Add
+                </button>
+              </div>
+              <div className="space-y-2">
+                {state.courses.map((c) => (
+                  <div key={c.id} className="border border-[#0d0d0d]/30 bg-white">
+                    <div className="flex items-center gap-2 border-b border-[#0d0d0d]/10 px-3 py-2">
+                      <span
+                        className="h-3 w-3 shrink-0"
+                        style={{ backgroundColor: c.color }}
+                      />
                       <input
                         value={c.name}
                         onChange={(e) => updateCourse(c.id, { name: e.target.value })}
                         placeholder="Course"
-                        className="w-full rounded border border-slate-200 px-2 py-1 text-sm"
+                        className="min-w-0 flex-1 bg-transparent text-sm font-bold outline-none"
                       />
+                      <button
+                        onClick={() => removeCourse(c.id)}
+                        className="text-xs text-[#2d2d2d]/40 hover:text-red-600"
+                        aria-label="Remove course"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 px-3 py-2">
                       <input
                         value={c.faculty}
                         onChange={(e) => updateCourse(c.id, { faculty: e.target.value })}
                         placeholder="Faculty"
-                        className="w-full rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                        className="min-w-0 border-b border-dashed border-[#0d0d0d]/20 bg-transparent text-xs text-[#2d2d2d]/70 outline-none focus:border-[#0d0d0d]"
                       />
-                      <label className="flex items-center gap-2 text-xs text-slate-600">
-                        Duration
+                      <label
+                        className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
+                        style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                      >
                         <input
                           type="number"
                           min={1}
@@ -568,30 +573,32 @@ function Index() {
                               durationSlots: Math.max(1, parseInt(e.target.value || "1", 10)),
                             })
                           }
-                          className="w-14 rounded border border-slate-200 px-2 py-1 text-xs"
+                          className="w-10 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
                         />
-                        <span>slot(s)</span>
+                        <span>slot</span>
                       </label>
                     </div>
-                    <button
-                      onClick={() => removeCourse(c.id)}
-                      className="rounded px-2 py-1 text-xs text-slate-400 hover:bg-red-50 hover:text-red-600"
-                    >
-                      ×
-                    </button>
                   </div>
-                </div>
-              ))}
-            </div>
-          </section>
+                ))}
+              </div>
+            </section>
 
-          <section className="rounded-lg border border-slate-200 bg-white p-4">
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-600">
-              Bulk block / break
-            </h2>
-            <div className="space-y-3 text-xs">
-              <div>
-                <div className="mb-1 font-medium text-slate-700">Weekdays</div>
+            {/* Bulk block/break */}
+            <section className="border border-dashed border-[#0d0d0d]/50 bg-[#f5f3ee] p-4">
+              <h3
+                className="mb-2 text-[11px] font-bold uppercase tracking-widest"
+                style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+              >
+                Bulk Block / Break
+              </h3>
+              <p className="mb-3 text-[11px] text-[#2d2d2d]/70">
+                Pick weekdays and slots to apply an action across the whole date range.
+              </p>
+
+              <div className="mb-3">
+                <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/60">
+                  Weekdays
+                </div>
                 <div className="flex flex-wrap gap-1">
                   {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((w, i) => {
                     const on = bulkWeekdays.includes(i);
@@ -603,10 +610,10 @@ function Index() {
                             prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i],
                           )
                         }
-                        className={`rounded border px-2 py-1 ${
+                        className={`border px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${
                           on
-                            ? "border-slate-900 bg-slate-900 text-white"
-                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                            ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
+                            : "border-[#0d0d0d]/30 bg-white text-[#2d2d2d]"
                         }`}
                       >
                         {w}
@@ -615,9 +622,15 @@ function Index() {
                   })}
                 </div>
               </div>
-              <div>
-                <div className="mb-1 font-medium text-slate-700">Time slots</div>
-                <div className="max-h-40 space-y-1 overflow-y-auto rounded border border-slate-200 p-2">
+
+              <div className="mb-3">
+                <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/60">
+                  Time slots
+                </div>
+                <div
+                  className="max-h-36 space-y-1 overflow-y-auto border border-[#0d0d0d]/20 bg-white p-2 text-[11px]"
+                  style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                >
                   {state.slots.map((slot, i) => {
                     const on = bulkSlots.includes(i);
                     return (
@@ -630,230 +643,370 @@ function Index() {
                               prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i],
                             )
                           }
+                          className="accent-[#0d0d0d]"
                         />
                         <span>
                           {slotLabel(slot)}
-                          {slot.isBreak && <span className="ml-1 text-amber-700">(break)</span>}
+                          {slot.isBreak && (
+                            <span className="ml-1 text-[#b45309]">·break</span>
+                          )}
                         </span>
                       </label>
                     );
                   })}
                 </div>
               </div>
-              <label className="flex items-center gap-2">
+
+              <label className="mb-3 flex items-center gap-2 text-[11px]">
                 <input
                   type="checkbox"
                   checked={bulkAllClasses}
                   onChange={(e) => setBulkAllClasses(e.target.checked)}
+                  className="accent-[#0d0d0d]"
                 />
-                <span>Apply to all classes</span>
+                <span className="font-medium">Apply to all classes</span>
               </label>
+
               <div className="grid grid-cols-3 gap-1">
                 <button
-                  onClick={() =>
-                    applyBulk(bulkWeekdays, bulkSlots, "blocked", bulkAllClasses)
-                  }
+                  onClick={() => applyBulk(bulkWeekdays, bulkSlots, "blocked", bulkAllClasses)}
                   disabled={bulkWeekdays.length === 0 || bulkSlots.length === 0}
-                  className="rounded border border-slate-300 bg-slate-100 px-2 py-1 font-medium disabled:opacity-50"
+                  className="border border-[#0d0d0d] bg-white px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-[#e8e4dd] disabled:opacity-40"
                 >
                   Block
                 </button>
                 <button
-                  onClick={() =>
-                    applyBulk(bulkWeekdays, bulkSlots, "break", bulkAllClasses)
-                  }
+                  onClick={() => applyBulk(bulkWeekdays, bulkSlots, "break", bulkAllClasses)}
                   disabled={bulkWeekdays.length === 0 || bulkSlots.length === 0}
-                  className="rounded border border-amber-200 bg-amber-100 px-2 py-1 font-medium text-amber-800 disabled:opacity-50"
+                  className="border border-[#b45309] bg-[#d97706] px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white hover:bg-[#b45309] disabled:opacity-40"
                 >
                   Break
                 </button>
                 <button
-                  onClick={() =>
-                    applyBulk(bulkWeekdays, bulkSlots, "erase", bulkAllClasses)
-                  }
+                  onClick={() => applyBulk(bulkWeekdays, bulkSlots, "erase", bulkAllClasses)}
                   disabled={bulkWeekdays.length === 0 || bulkSlots.length === 0}
-                  className="rounded border border-slate-200 bg-white px-2 py-1 font-medium hover:bg-slate-50 disabled:opacity-50"
+                  className="border border-[#0d0d0d]/40 bg-white px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:border-[#0d0d0d] disabled:opacity-40"
                 >
                   Clear
                 </button>
               </div>
-            </div>
-          </section>
+            </section>
 
-          <section className="rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-600">
-            <p className="font-semibold text-slate-700">How to use</p>
-            <ol className="mt-2 list-decimal space-y-1 pl-4">
-              <li>Click any empty cell → pick a course, break, or block.</li>
-              <li>Then click-and-drag across cells to paint the same choice.</li>
-              <li>Set a course "Duration" to auto-fill consecutive slots.</li>
-              <li>Use Bulk block to disable e.g. last 2 slots every Wednesday.</li>
-              <li>Faculty double-booked across classes gets flagged red.</li>
-            </ol>
-          </section>
-
-          <section className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Time slots</h2>
-              <button onClick={addSlot} className="rounded bg-slate-900 px-2 py-1 text-xs text-white hover:bg-slate-800">
-                + Add
-              </button>
-            </div>
-            <div className="space-y-1 text-xs">
-              {state.slots.map((sl, i) => (
-                <div
-                  key={i}
-                  className={`flex items-center gap-1 rounded border p-1 ${
-                    sl.isBreak ? "border-amber-200 bg-amber-50" : "border-slate-200"
-                  }`}
+            {/* Time slots editor */}
+            <section>
+              <div className="mb-3 flex items-center justify-between">
+                <h3
+                  className="text-[11px] font-bold uppercase tracking-widest text-[#0d0d0d]"
+                  style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
                 >
-                  <span className="w-5 text-center text-slate-400">{i + 1}</span>
-                  <input
-                    type="time"
-                    value={sl.start}
-                    onChange={(e) => updateSlot(i, { start: e.target.value })}
-                    className="w-24 rounded border border-slate-200 px-1 py-0.5"
-                  />
-                  <input
-                    type="time"
-                    value={sl.end}
-                    onChange={(e) => updateSlot(i, { end: e.target.value })}
-                    className="w-24 rounded border border-slate-200 px-1 py-0.5"
-                  />
-                  <button
-                    onClick={() => toggleSlotBreak(i)}
-                    className={`rounded px-1 py-0.5 text-[10px] font-medium ${
+                  Time Slots
+                </h3>
+                <button
+                  onClick={addSlot}
+                  className="border border-[#0d0d0d] bg-[#f5f3ee] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider hover:bg-[#0d0d0d] hover:text-[#f5f3ee]"
+                >
+                  + Add
+                </button>
+              </div>
+              <div
+                className="space-y-1 text-[11px]"
+                style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+              >
+                {state.slots.map((sl, i) => (
+                  <div
+                    key={i}
+                    className={`flex items-center gap-1 border px-1.5 py-1 ${
                       sl.isBreak
-                        ? "bg-amber-200 text-amber-900"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        ? "border-[#d97706]/40 bg-[#fef3c7]"
+                        : "border-[#0d0d0d]/20 bg-white"
                     }`}
-                    title="Toggle break"
                   >
-                    Brk
-                  </button>
-                  <button
-                    onClick={() => removeSlot(i)}
-                    className="rounded px-1 py-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-            <div className="mt-2 text-[11px] text-slate-500">
-              Slots can be any length. Mark "Brk" for a break — those cells auto-fill and can't be assigned.
-            </div>
-          </section>
-        </aside>
-
-        <section className="space-y-3">
-          {hasConflicts && (
-            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
-              Faculty conflict — same teacher scheduled in two classes at the same time (highlighted red).
-            </div>
-          )}
-          {dates.length === 0 && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">
-              Pick a valid date range.
-            </div>
-          )}
-
-          <div className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">{activeClass?.name}</h2>
-              <div className="flex items-center gap-2">
-                {armedTool && (
-                  <div className="flex items-center gap-2 rounded border border-slate-300 bg-slate-50 px-2 py-1 text-xs">
-                    <span className="text-slate-500">Tool:</span>
-                    {armedTool.kind === "course" ? (
-                      <span className="flex items-center gap-1">
-                        <span
-                          className="inline-block h-3 w-3 rounded"
-                          style={{
-                            backgroundColor:
-                              state.courses.find((c) => c.id === armedTool.courseId)?.color ?? "#ddd",
-                          }}
-                        />
-                        <span className="font-medium">
-                          {state.courses.find((c) => c.id === armedTool.courseId)?.name ?? "?"}
-                        </span>
-                      </span>
-                    ) : (
-                      <span className="font-medium capitalize">{armedTool.kind}</span>
-                    )}
+                    <span className="w-4 text-center text-[#2d2d2d]/40">{i + 1}</span>
+                    <input
+                      type="time"
+                      value={sl.start}
+                      onChange={(e) => updateSlot(i, { start: e.target.value })}
+                      className="w-20 border-b border-dashed border-[#0d0d0d]/20 bg-transparent px-0.5 py-0.5 outline-none focus:border-[#0d0d0d]"
+                    />
+                    <span className="text-[#2d2d2d]/40">—</span>
+                    <input
+                      type="time"
+                      value={sl.end}
+                      onChange={(e) => updateSlot(i, { end: e.target.value })}
+                      className="w-20 border-b border-dashed border-[#0d0d0d]/20 bg-transparent px-0.5 py-0.5 outline-none focus:border-[#0d0d0d]"
+                    />
                     <button
-                      onClick={() => setArmedTool(null)}
-                      className="rounded px-1 text-slate-400 hover:text-red-600"
-                      title="Clear tool"
+                      onClick={() => toggleSlotBreak(i)}
+                      title="Toggle break"
+                      className={`ml-auto border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                        sl.isBreak
+                          ? "border-[#b45309] bg-[#d97706] text-white"
+                          : "border-[#0d0d0d]/30 bg-[#f5f3ee] text-[#2d2d2d]"
+                      }`}
+                    >
+                      Brk
+                    </button>
+                    <button
+                      onClick={() => removeSlot(i)}
+                      className="px-1 text-[#2d2d2d]/40 hover:text-red-600"
                     >
                       ×
                     </button>
                   </div>
-                )}
-                <span className="text-xs text-slate-500">
-                  {state.slots.length} slots
-                </span>
+                ))}
+              </div>
+            </section>
+          </div>
+        </aside>
+
+        {/* Main */}
+        <main className="flex min-w-0 flex-1 flex-col">
+          {/* Toolbar */}
+          <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b-2 border-[#0d0d0d] bg-white/60 px-4 py-3 sm:flex sm:flex-wrap sm:justify-between sm:px-8 sm:py-4">
+            <div className="flex min-w-0 flex-wrap items-end gap-4">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/50">
+                  From
+                </div>
+                <input
+                  type="date"
+                  value={state.fromDate}
+                  onChange={(e) => setState((s) => ({ ...s, fromDate: e.target.value }))}
+                  className="border-b border-[#0d0d0d] bg-transparent py-0.5 text-sm font-semibold outline-none"
+                  style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                />
+              </div>
+              <span className="pb-1 text-lg text-[#2d2d2d]/30">/</span>
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/50">
+                  To
+                </div>
+                <input
+                  type="date"
+                  value={state.toDate}
+                  onChange={(e) => setState((s) => ({ ...s, toDate: e.target.value }))}
+                  className="border-b border-[#0d0d0d] bg-transparent py-0.5 text-sm font-semibold outline-none"
+                  style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                />
               </div>
             </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                onClick={exportCSV}
+                className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
+              >
+                CSV
+              </button>
+              <button
+                onClick={exportExcel}
+                className="border-2 border-[#0d0d0d] bg-[#0d0d0d] px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#f5f3ee] transition-transform hover:opacity-90 active:translate-y-0.5"
+              >
+                Export Excel
+              </button>
+            </div>
+          </header>
 
-            <div className="overflow-x-auto" ref={gridRef}>
-              <table className="w-full border-collapse select-none text-sm">
+          {/* Status strip */}
+          <div className="flex flex-wrap items-center gap-3 border-b border-[#0d0d0d]/10 bg-[#f5f3ee] px-4 py-2 text-xs sm:px-8">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/50">
+                Class
+              </span>
+              <span
+                className="truncate font-bold"
+                style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+              >
+                {activeClass?.name}
+              </span>
+            </div>
+            <span className="text-[#2d2d2d]/20">·</span>
+            <span
+              className="text-[11px] text-[#2d2d2d]/60"
+              style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+            >
+              {dates.length} day{dates.length === 1 ? "" : "s"} · {state.slots.length} slots
+            </span>
+            {armedTool && (
+              <div className="ml-auto flex items-center gap-2 border-2 border-[#0d0d0d] bg-white px-2 py-1">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/50">
+                  Tool
+                </span>
+                {armedTool.kind === "course" ? (
+                  <span className="flex items-center gap-1">
+                    <span
+                      className="inline-block h-3 w-3"
+                      style={{
+                        backgroundColor:
+                          state.courses.find((c) => c.id === armedTool.courseId)?.color ?? "#ddd",
+                      }}
+                    />
+                    <span className="font-bold">
+                      {state.courses.find((c) => c.id === armedTool.courseId)?.name ?? "?"}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="font-bold uppercase tracking-wider">{armedTool.kind}</span>
+                )}
+                <button
+                  onClick={() => setArmedTool(null)}
+                  className="text-[#2d2d2d]/40 hover:text-red-600"
+                  aria-label="Clear tool"
+                >
+                  ×
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Alerts */}
+          <div className="space-y-2 px-4 pt-4 sm:px-8">
+            {hasConflicts && (
+              <div className="border-2 border-red-600 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                Faculty conflict — the same teacher is scheduled in two classes at the same time (red cells).
+              </div>
+            )}
+            {dates.length === 0 && (
+              <div className="border-2 border-[#d97706] bg-[#fef3c7] px-3 py-2 text-xs font-semibold text-[#b45309]">
+                Pick a valid date range.
+              </div>
+            )}
+            <p className="text-[11px] text-[#2d2d2d]/60">
+              Click any cell to pick a course. Click-drag to paint. Right-click to change tool. Alt+right-click to erase.
+            </p>
+          </div>
+
+          {/* Grid */}
+          <div className="flex-1 overflow-auto p-4 sm:p-8">
+            <div className="inline-block min-w-full" ref={gridRef}>
+              <table className="w-full border-collapse border-2 border-[#0d0d0d] text-left">
                 <thead>
-                  <tr>
-                    <th className="sticky left-0 z-10 w-44 border border-slate-200 bg-slate-100 p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <tr className="bg-[#0d0d0d] text-[#f5f3ee]">
+                    <th
+                      className="sticky left-0 z-10 w-32 border border-[#f5f3ee]/20 bg-[#0d0d0d] p-3 text-[10px] font-bold uppercase tracking-widest"
+                      style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                    >
                       Day
                     </th>
                     {state.slots.map((slot, i) => (
                       <th
                         key={i}
-                        className={`border border-slate-200 p-1 text-xs font-semibold text-slate-600 ${
-                          slot.isBreak ? "bg-amber-100" : "bg-slate-100"
-                        }`}
-                        style={{ minWidth: 120 }}
+                        className="border border-[#f5f3ee]/20 p-2 text-center align-middle"
+                        style={{ minWidth: 110 }}
                       >
-                        <div className="whitespace-nowrap px-1 py-1 text-center">
+                        <div
+                          className="whitespace-nowrap text-[10px] font-bold uppercase tracking-wider"
+                          style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                        >
                           {slotLabel(slot)}
-                          {slot.isBreak && <div className="text-[10px] text-amber-700">Break</div>}
                         </div>
+                        {slot.isBreak && (
+                          <div className="mt-0.5 text-[9px] font-bold uppercase tracking-widest text-[#fbbf24]">
+                            Break
+                          </div>
+                        )}
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="bg-white">
                   {dates.map((date) => {
                     const { weekday, date: dstr } = dayLabel(date);
                     return (
                       <tr key={date}>
-                        <th className="sticky left-0 z-10 border border-slate-200 bg-slate-50 p-2 text-left align-middle text-xs">
-                          <div className="font-semibold text-slate-800">{weekday}</div>
-                          <div className="text-slate-500">{dstr}</div>
+                        <th
+                          className="sticky left-0 z-10 border-2 border-[#0d0d0d] bg-[#e8e4dd] p-3 text-left align-middle"
+                          style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                        >
+                          <div className="text-xs font-bold uppercase tracking-wider">
+                            {weekday}
+                          </div>
+                          <div className="text-[10px] font-medium text-[#2d2d2d]/60">
+                            {dstr}
+                          </div>
                         </th>
                         {state.slots.map((sl, i) => {
                           if (!activeClass) return null;
                           const key = `${date}-${i}`;
                           const cell = activeClass.grid[key];
-                          const disp = sl.isBreak
-                            ? { text: "Break", bg: "#fef3c7", fg: "#92400e" }
-                            : cellDisplay(cell);
                           const isConflict = conflicts.has(`${activeClass.id}:${key}`);
+
+                          if (sl.isBreak) {
+                            return (
+                              <td
+                                key={i}
+                                onContextMenu={(e) => e.preventDefault()}
+                                className="border border-[#0d0d0d]/10 bg-[#fef3c7] p-1 text-center align-middle"
+                                style={{ minWidth: 110, height: 64 }}
+                              >
+                                <div className="text-[10px] font-bold uppercase tracking-widest text-[#b45309]">
+                                  Break
+                                </div>
+                              </td>
+                            );
+                          }
+
+                          const course =
+                            cell?.kind === "course"
+                              ? state.courses.find((c) => c.id === cell.courseId)
+                              : undefined;
+
                           return (
                             <td
                               key={i}
                               onMouseDown={(e) => onCellMouseDown(date, i, e)}
                               onMouseEnter={(e) => onCellEnter(date, i, e)}
                               onContextMenu={(e) => e.preventDefault()}
-                              className={`border p-2 text-xs align-middle ${
-                                sl.isBreak ? "cursor-not-allowed" : "cursor-pointer"
-                              } ${isConflict ? "border-red-500 ring-2 ring-red-400" : "border-slate-200"}`}
-                              style={{
-                                backgroundColor: disp.bg,
-                                color: disp.fg,
-                                minWidth: 120,
-                                height: 56,
-                              }}
+                              className={`p-1 align-middle ${
+                                isConflict
+                                  ? "border-2 border-red-600"
+                                  : "border border-[#0d0d0d]/10"
+                              } cursor-pointer`}
+                              style={{ minWidth: 110, height: 64 }}
                             >
-                              <div className="whitespace-pre-line font-medium leading-tight">
-                                {disp.text || "+"}
-                              </div>
+                              {!cell || cell.kind === "empty" ? (
+                                <div className="flex h-full min-h-[52px] items-center justify-center border-2 border-dashed border-[#0d0d0d]/10 text-[#2d2d2d]/25 transition-colors hover:border-[#0d0d0d]/60 hover:text-[#0d0d0d]">
+                                  +
+                                </div>
+                              ) : cell.kind === "break" ? (
+                                <div className="flex h-full min-h-[52px] items-center justify-center bg-[#fef3c7] text-[10px] font-bold uppercase tracking-widest text-[#b45309]">
+                                  {cell.label}
+                                </div>
+                              ) : cell.kind === "blocked" ? (
+                                <div className="flex h-full min-h-[52px] items-center justify-center bg-[repeating-linear-gradient(45deg,#e8e4dd_0_6px,#d9d5ce_6px_12px)] text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/60">
+                                  {cell.label}
+                                </div>
+                              ) : (
+                                <div
+                                  className={`flex h-full min-h-[52px] flex-col justify-between p-1.5 ${
+                                    isConflict ? "bg-red-100" : ""
+                                  }`}
+                                  style={
+                                    isConflict
+                                      ? undefined
+                                      : {
+                                          backgroundColor: `${course?.color ?? "#ddd"}55`,
+                                          borderLeft: `4px solid ${course?.color ?? "#ddd"}`,
+                                        }
+                                  }
+                                >
+                                  <div
+                                    className={`text-[11px] font-bold leading-tight ${
+                                      isConflict ? "text-red-700" : "text-[#0d0d0d]"
+                                    }`}
+                                    style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                                  >
+                                    {course?.name ?? "?"}
+                                  </div>
+                                  <div
+                                    className={`text-[9px] uppercase tracking-wider ${
+                                      isConflict ? "font-bold text-red-700" : "text-[#2d2d2d]/60"
+                                    }`}
+                                  >
+                                    {isConflict ? "Conflict · " : ""}
+                                    {course?.faculty ?? ""}
+                                  </div>
+                                </div>
+                              )}
                             </td>
                           );
                         })}
@@ -864,67 +1017,90 @@ function Index() {
               </table>
             </div>
           </div>
-        </section>
-      </main>
+        </main>
+      </div>
 
+      {/* Picker modal */}
       {picker && (
         <div
-          className="fixed inset-0 z-40 bg-black/30"
+          className="fixed inset-0 z-40 bg-[#0d0d0d]/40 p-4 backdrop-blur-sm"
           onClick={() => setPicker(null)}
         >
           <div
-            className="absolute left-1/2 top-1/2 w-[360px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-4 shadow-xl"
+            className="absolute left-1/2 top-1/2 w-[min(400px,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 border-2 border-[#0d0d0d] bg-[#f5f3ee] shadow-[8px_8px_0px_0px_#0d0d0d]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mb-3">
-              <div className="text-xs uppercase tracking-wide text-slate-500">Assign slot</div>
-              <div className="text-sm font-semibold text-slate-800">
-                {dayLabel(picker.date).weekday} {dayLabel(picker.date).date} · {state.slots[picker.slotIdx] ? slotLabel(state.slots[picker.slotIdx]) : ""}
+            <div className="border-b-2 border-[#0d0d0d] bg-[#0d0d0d] px-4 py-3 text-[#f5f3ee]">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[#f5f3ee]/60">
+                Assign Slot
               </div>
-              <div className="text-xs text-slate-500">
-                Tip: after picking, drag across cells to fill more with the same choice.
+              <div
+                className="mt-0.5 text-sm font-bold"
+                style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+              >
+                {dayLabel(picker.date).weekday} {dayLabel(picker.date).date}
+                {" · "}
+                <span style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
+                  {state.slots[picker.slotIdx] ? slotLabel(state.slots[picker.slotIdx]) : ""}
+                </span>
               </div>
             </div>
-            <div className="mb-3 space-y-1">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Courses</div>
-              {state.courses.length === 0 && (
-                <div className="text-xs text-slate-500">No courses yet. Add one from the sidebar.</div>
-              )}
-              {state.courses.map((c) => (
+
+            <div className="max-h-[60vh] overflow-y-auto p-4">
+              <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/60">
+                Courses
+              </div>
+              <div className="mb-4 space-y-1">
+                {state.courses.length === 0 && (
+                  <div className="text-xs text-[#2d2d2d]/60">
+                    No courses yet. Add one from the sidebar.
+                  </div>
+                )}
+                {state.courses.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => pickTool({ kind: "course", courseId: c.id })}
+                    className="flex w-full items-center gap-3 border border-[#0d0d0d]/30 bg-white px-3 py-2 text-left transition-colors hover:border-[#0d0d0d]"
+                  >
+                    <span className="h-4 w-4 shrink-0" style={{ backgroundColor: c.color }} />
+                    <span className="min-w-0 flex-1">
+                      <span
+                        className="block truncate text-sm font-bold"
+                        style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                      >
+                        {c.name}
+                      </span>
+                      <span className="block truncate text-[11px] text-[#2d2d2d]/60">
+                        {c.faculty}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/60">
+                Actions
+              </div>
+              <div className="grid grid-cols-3 gap-2">
                 <button
-                  key={c.id}
-                  onClick={() => pickTool({ kind: "course", courseId: c.id })}
-                  className="flex w-full items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                  onClick={() => pickTool({ kind: "break" })}
+                  className="border-2 border-[#b45309] bg-[#fef3c7] px-2 py-2 text-[10px] font-bold uppercase tracking-wider text-[#b45309] hover:bg-[#fde68a]"
                 >
-                  <span className="h-4 w-4 rounded" style={{ backgroundColor: c.color }} />
-                  <span className="flex-1">
-                    <span className="font-medium">{c.name}</span>
-                    <span className="ml-2 text-xs text-slate-500">{c.faculty}</span>
-                  </span>
+                  Break
                 </button>
-              ))}
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                onClick={() => pickTool({ kind: "break" })}
-                className="rounded-md border border-slate-200 px-2 py-2 text-xs font-medium"
-                style={{ backgroundColor: "#fef3c7", color: "#92400e" }}
-              >
-                Break
-              </button>
-              <button
-                onClick={() => pickTool({ kind: "blocked" })}
-                className="rounded-md border border-slate-200 px-2 py-2 text-xs font-medium"
-                style={{ backgroundColor: "#e5e7eb", color: "#374151" }}
-              >
-                Block
-              </button>
-              <button
-                onClick={() => pickTool({ kind: "erase" })}
-                className="rounded-md border border-slate-200 bg-white px-2 py-2 text-xs font-medium hover:bg-slate-50"
-              >
-                Clear
-              </button>
+                <button
+                  onClick={() => pickTool({ kind: "blocked" })}
+                  className="border-2 border-[#0d0d0d] bg-[#e8e4dd] px-2 py-2 text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d] hover:bg-[#d9d5ce]"
+                >
+                  Block
+                </button>
+                <button
+                  onClick={() => pickTool({ kind: "erase" })}
+                  className="border-2 border-[#0d0d0d]/40 bg-white px-2 py-2 text-[10px] font-bold uppercase tracking-wider hover:border-[#0d0d0d]"
+                >
+                  Clear
+                </button>
+              </div>
             </div>
           </div>
         </div>
