@@ -1970,17 +1970,47 @@ function Index() {
                       type="file"
                       accept=".csv,text/csv"
                       className="hidden"
-                      onChange={(e) => {
+                      onChange={async (e) => {
                         const f = e.target.files?.[0];
-                        if (f) importBlockCsv(f);
+                        if (f) {
+                          const text = await f.text();
+                          setPendingBlockCsv({ name: f.name, text });
+                          setBlockReport(`Loaded "${f.name}". Click Block to apply.`);
+                        }
                         e.target.value = "";
                       }}
                     />
                   </label>
+                  <button
+                    onClick={() => {
+                      if (!pendingBlockCsv) { setBlockReport("Upload a CSV first."); return; }
+                      applyBlockCsv(pendingBlockCsv.text);
+                    }}
+                    disabled={!pendingBlockCsv}
+                    className="border border-[#0d0d0d] bg-rose-300 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Block
+                  </button>
+                  {pendingBlockCsv && (
+                    <button
+                      onClick={() => { setPendingBlockCsv(null); setBlockReport(""); }}
+                      className="border border-[#0d0d0d]/60 bg-white px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
+                    >
+                      Clear
+                    </button>
+                  )}
                 </div>
+                {pendingBlockCsv && (
+                  <p className="mt-2 text-[10px] font-bold text-[#2d2d2d]/80">
+                    Loaded: <code>{pendingBlockCsv.name}</code>
+                  </p>
+                )}
+                {blockReport && (
+                  <p className="mt-2 whitespace-pre-wrap text-[10px] text-[#2d2d2d]/80">{blockReport}</p>
+                )}
                 <p className="mt-2 text-[10px] text-[#2d2d2d]/60">
-                  Columns: <code>date, periods, label, scope</code>. Periods are 1-based
-                  over non-break slots (e.g. <code>1,2</code> or <code>5-8</code> or <code>all</code>).
+                  Columns: <code>date, Reason, Session</code>. Date is <code>DD/MM/YYYY</code>.
+                  Session is <code>all</code> or period numbers like <code>1,3,5,6</code>.
                 </p>
               </div>
             </section>
