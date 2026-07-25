@@ -148,9 +148,20 @@ function Index() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) as State;
-        setState(parsed);
-        setActiveClassId(parsed.classes[0]?.id ?? "");
+        const parsed = JSON.parse(raw) as Partial<State>;
+        const base = defaultState();
+        const merged: State = {
+          ...base,
+          ...parsed,
+          startTime: parsed.startTime ?? base.startTime,
+          endTime: parsed.endTime ?? base.endTime,
+          slotMinutes: parsed.slotMinutes ?? base.slotMinutes,
+          slots: parsed.slots ?? base.slots,
+          courses: parsed.courses ?? base.courses,
+          classes: parsed.classes ?? base.classes,
+        };
+        setState(merged);
+        setActiveClassId(merged.classes[0]?.id ?? "");
       }
     } catch {}
   }, []);
