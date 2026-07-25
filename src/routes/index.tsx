@@ -1817,13 +1817,16 @@ function Index() {
                   const allowed =
                     courseAllowedOn(c, picker.date) &&
                     courseAllowedSlot(c, picker.slotIdx);
+                  const dateRange = c.fromDate || c.toDate ? `${c.fromDate ?? "start"} → ${c.toDate ?? "end"}` : null;
                   const ruleLabel =
+                    dateRange ||
                     (c.allowedWeekdays && c.allowedWeekdays.length > 0) ||
                     (c.allowedSlots && c.allowedSlots.length > 0)
                       ? [
-                          c.allowedWeekdays && c.allowedWeekdays.length > 0
-                            ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(",")
-                            : "any day",
+                          dateRange ??
+                            (c.allowedWeekdays && c.allowedWeekdays.length > 0
+                              ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(",")
+                              : "any day"),
                           c.allowedSlots && c.allowedSlots.length > 0
                             ? c.allowedSlots
                                 .map((i) => `P${periodNumberFor(i)}`)
