@@ -1222,10 +1222,28 @@ function Index() {
     if (rawLines.length === 0) { alert("CSV is empty."); return; }
     const header = parseCsvRow(rawLines[0]).map((c) => c.toLowerCase());
     const dateIdx = header.indexOf("date");
-    const periodsIdx = header.indexOf("periods");
-    const labelIdx = header.indexOf("label");
+    const periodsIdx = (() => {
+      const i = header.indexOf("session");
+      return i >= 0 ? i : header.indexOf("periods");
+    })();
+    const labelIdx = (() => {
+      const i = header.indexOf("reason");
+      return i >= 0 ? i : header.indexOf("label");
+    })();
     const scopeIdx = header.indexOf("scope");
     if (dateIdx < 0) { alert("CSV missing required 'date' column."); return; }
+
+    const normalizeDate = (raw: string): string => {
+      const s = (raw || "").trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+      if (!m) return "";
+      const d = m[1].padStart(2, "0");
+      const mo = m[2].padStart(2, "0");
+      let y = m[3];
+      if (y.length === 2) y = (parseInt(y, 10) > 50 ? "19" : "20") + y;
+      return `${y}-${mo}-${d}`;
+    };
 
     const nonBreakIdxs = state.slots.map((sl, i) => ({ sl, i })).filter((x) => !x.sl.isBreak).map((x) => x.i);
     const parsePeriods = (str: string): number[] => {
@@ -1249,8 +1267,8 @@ function Index() {
       const classes: ClassData[] = s.classes.map((cls) => ({ ...cls, grid: { ...cls.grid } }));
       rawLines.slice(1).forEach((line, i) => {
         const cells = parseCsvRow(line);
-        const date = cells[dateIdx];
-        if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) { errors.push(`Row ${i + 2}: bad date "${date}"`); skipped++; return; }
+        const date = normalizeDate(cells[dateIdx]);
+        if (!date) { errors.push(`Row ${i + 2}: bad date "${cells[dateIdx]}" (use DD/MM/YYYY)`); skipped++; return; }
         const periods = parsePeriods(periodsIdx >= 0 ? cells[periodsIdx] : "all");
         if (periods.length === 0) { errors.push(`Row ${i + 2}: no valid periods parsed from "${cells[periodsIdx] ?? ""}"`); noPeriods++; skipped++; return; }
         if (!inRange.has(date)) { errors.push(`Row ${i + 2}: date ${date} is outside timetable range ${s.fromDate}..${s.toDate}`); outOfRange++; skipped++; return; }
