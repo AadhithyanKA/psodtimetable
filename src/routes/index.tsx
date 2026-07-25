@@ -280,6 +280,37 @@ const normalizeStateSnapshot = (snapshot: SavedState): State => {
   };
 };
 
+const countCourseSessionsInDates = (
+  grid: Record<string, Cell>,
+  course: Course,
+  slots: Slot[],
+  dateList: string[],
+  onStart?: (date: string, slotIdx: number) => void,
+): number => {
+  const span = cleanDurationSlots(course.durationSlots, slots);
+  let count = 0;
+  dateList.forEach((date) => {
+    let slotIdx = 0;
+    while (slotIdx < slots.length) {
+      const cell = grid[`${date}-${slotIdx}`];
+      if (cell?.kind !== "course" || cell.courseId !== course.id) {
+        slotIdx++;
+        continue;
+      }
+      count++;
+      onStart?.(date, slotIdx);
+      let covered = 1;
+      while (covered < span && slotIdx + covered < slots.length) {
+        const next = grid[`${date}-${slotIdx + covered}`];
+        if (next?.kind !== "course" || next.courseId !== course.id) break;
+        covered++;
+      }
+      slotIdx += Math.max(1, covered);
+    }
+  });
+  return count;
+};
+
 type Tool =
   | { kind: "course"; courseId: string }
   | { kind: "break" }
