@@ -681,7 +681,7 @@ function Index() {
 
       // Round-robin across (class, course) to spread placements fairly
       weeks.forEach((weekDates) => {
-        type Task = { cls: ClassData; course: Course; remaining: number; perDay: Record<string, number>; startsByDate: Record<string, number[]> };
+        type Task = { cls: ClassData; course: Course; remaining: number; perDay: Record<string, number>; perSlot: Record<number, number>; startsByDate: Record<string, number[]> };
         const tasks: Task[] = [];
         classes.forEach((cls) => {
           cls.courses.forEach((course) => {
@@ -706,6 +706,7 @@ function Index() {
             // Count sessions already placed for this course in this week
             let placed = 0;
             const perDay: Record<string, number> = {};
+            const perSlot: Record<number, number> = {};
             weekDates.forEach((d) => {
               perDay[d] = 0;
               s.slots.forEach((_, i) => {
@@ -716,12 +717,13 @@ function Index() {
                   if (!prev || prev.kind !== "course" || prev.courseId !== course.id) {
                     placed++;
                     perDay[d]++;
+                    perSlot[i] = (perSlot[i] ?? 0) + 1;
                   }
                 }
               });
             });
             const remaining = Math.max(0, target - placed);
-            if (remaining > 0) tasks.push({ cls, course, remaining, perDay, startsByDate });
+            if (remaining > 0) tasks.push({ cls, course, remaining, perDay, perSlot, startsByDate });
           });
         });
 
@@ -737,13 +739,17 @@ function Index() {
           });
           for (const task of tasks) {
             if (task.remaining <= 0) continue;
-            // Score candidates: prefer days with fewest sessions of this course, then earliest slot
+            // Score candidates: spread across days AND across periods so post-break
+            // slots also get used when the weekly target is smaller than opportunities.
             let best: { date: string; slot: number; score: number } | null = null;
             for (const date of weekDates) {
               const starts = task.startsByDate[date] ?? [];
               for (const sIdx of starts) {
                 if (!canPlace(task.cls, task.course, date, sIdx)) continue;
-                const score = (task.perDay[date] ?? 0) * 100 + sIdx;
+                const score =
+                  (task.perDay[date] ?? 0) * 10000 +
+                  (task.perSlot[sIdx] ?? 0) * 100 +
+                  sIdx;
                 if (!best || score < best.score) best = { date, slot: sIdx, score };
               }
             }
@@ -756,6 +762,7 @@ function Index() {
               (facultyBusy[key] ??= new Set()).add(task.course.faculty);
             }
             task.perDay[best.date] = (task.perDay[best.date] ?? 0) + 1;
+            task.perSlot[best.slot] = (task.perSlot[best.slot] ?? 0) + 1;
             task.remaining--;
             placedCount++;
             progressed = true;
