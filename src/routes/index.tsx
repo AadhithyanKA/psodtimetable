@@ -906,38 +906,44 @@ function Index() {
           return aRules - bRules;
         });
 
+        let nextPlacement: { task: AutoTask; date: string; slot: number; score: number } | null = null;
         for (const task of tasks) {
           if (task.remaining <= 0) continue;
-          let best: { date: string; slot: number; score: number } | null = null;
           for (const [date, starts] of Object.entries(task.startsByDate)) {
             for (const sIdx of starts) {
               if (!canPlace(task.cls, task.course, date, sIdx)) continue;
-              // Fill the nearest matching opportunity first: earlier date, then earlier period.
-              // Load-balancing is only a tie-breaker now, so rules never skip an open slot
-              // just to spread the timetable later in the range.
+              const taskIndex = tasks.indexOf(task);
+              // Global earliest-first selection: choose the nearest valid date/period
+              // across every class/course before considering spread or course priority.
+              // This prevents an open rule slot from being skipped while a later slot is used.
               const score =
-                (task.dateOrder[date] ?? workingDates.length) * 100000000 +
-                sIdx * 100000 +
-                (task.perDay[date] ?? 0) * 1000 +
-                classDayLoad(task.cls, date) * 10 +
-                (task.perSlot[sIdx] ?? 0);
-              if (!best || score < best.score) best = { date, slot: sIdx, score };
+                (workingDates.indexOf(date) >= 0 ? workingDates.indexOf(date) : workingDates.length) * 1000000000 +
+                sIdx * 1000000 +
+                (task.dateOrder[date] ?? workingDates.length) * 10000 +
+                taskIndex * 100 +
+                (task.perDay[date] ?? 0) * 10 +
+                (task.perSlot[sIdx] ?? 0) +
+                classDayLoad(task.cls, date);
+              if (!nextPlacement || score < nextPlacement.score) {
+                nextPlacement = { task, date, slot: sIdx, score };
+              }
             }
           }
-          if (!best) continue;
-
-          const span = cleanDurationSlots(task.course.durationSlots, s.slots);
-          for (let i = 0; i < span; i++) {
-            const key = `${best.date}-${best.slot + i}`;
-            task.cls.grid[key] = { kind: "course", courseId: task.course.id };
-            (facultyBusy[key] ??= new Set()).add(task.course.faculty);
-          }
-          task.perDay[best.date] = (task.perDay[best.date] ?? 0) + 1;
-          task.perSlot[best.slot] = (task.perSlot[best.slot] ?? 0) + 1;
-          task.remaining--;
-          placedCount++;
-          progressed = true;
         }
+        if (!nextPlacement) continue;
+
+        const task = nextPlacement.task;
+        const span = cleanDurationSlots(task.course.durationSlots, s.slots);
+        for (let i = 0; i < span; i++) {
+          const key = `${nextPlacement.date}-${nextPlacement.slot + i}`;
+          task.cls.grid[key] = { kind: "course", courseId: task.course.id };
+          (facultyBusy[key] ??= new Set()).add(task.course.faculty);
+        }
+        task.perDay[nextPlacement.date] = (task.perDay[nextPlacement.date] ?? 0) + 1;
+        task.perSlot[nextPlacement.slot] = (task.perSlot[nextPlacement.slot] ?? 0) + 1;
+        task.remaining--;
+        placedCount++;
+        progressed = true;
       }
 
       tasks.forEach((task) => {
