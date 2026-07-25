@@ -690,6 +690,59 @@ function Index() {
               <li>Faculty double-booked across classes gets flagged red.</li>
             </ol>
           </section>
+
+          <section className="rounded-lg border border-slate-200 bg-white p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Time slots</h2>
+              <button onClick={addSlot} className="rounded bg-slate-900 px-2 py-1 text-xs text-white hover:bg-slate-800">
+                + Add
+              </button>
+            </div>
+            <div className="space-y-1 text-xs">
+              {state.slots.map((sl, i) => (
+                <div
+                  key={i}
+                  className={`flex items-center gap-1 rounded border p-1 ${
+                    sl.isBreak ? "border-amber-200 bg-amber-50" : "border-slate-200"
+                  }`}
+                >
+                  <span className="w-5 text-center text-slate-400">{i + 1}</span>
+                  <input
+                    type="time"
+                    value={sl.start}
+                    onChange={(e) => updateSlot(i, { start: e.target.value })}
+                    className="w-24 rounded border border-slate-200 px-1 py-0.5"
+                  />
+                  <input
+                    type="time"
+                    value={sl.end}
+                    onChange={(e) => updateSlot(i, { end: e.target.value })}
+                    className="w-24 rounded border border-slate-200 px-1 py-0.5"
+                  />
+                  <button
+                    onClick={() => toggleSlotBreak(i)}
+                    className={`rounded px-1 py-0.5 text-[10px] font-medium ${
+                      sl.isBreak
+                        ? "bg-amber-200 text-amber-900"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                    title="Toggle break"
+                  >
+                    Brk
+                  </button>
+                  <button
+                    onClick={() => removeSlot(i)}
+                    className="rounded px-1 py-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 text-[11px] text-slate-500">
+              Slots can be any length. Mark "Brk" for a break — those cells auto-fill and can't be assigned.
+            </div>
+          </section>
         </aside>
 
         <section className="space-y-3">
