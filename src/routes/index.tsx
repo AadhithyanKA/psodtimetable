@@ -250,11 +250,13 @@ function Index() {
         state.classes.forEach((cls) => {
           const cell = cls.grid[key];
           if (cell?.kind === "course") {
-            const course = state.courses.find((c) => c.id === cell.courseId);
+            const course = cls.courses.find((c) => c.id === cell.courseId);
             if (!course) return;
             (facultyToClass[course.faculty] ??= []).push(cls.id);
-            // Rule violation: course placed on a weekday its faculty doesn't work
-            if (!courseAllowedOn(course, date)) set.add(`${cls.id}:${key}`);
+            // Rule violation: course placed on a weekday or period it isn't allowed
+            if (!courseAllowedOn(course, date) || !courseAllowedSlot(course, i)) {
+              set.add(`${cls.id}:${key}`);
+            }
           }
         });
         Object.values(facultyToClass).forEach((clsIds) => {
@@ -266,9 +268,10 @@ function Index() {
   }, [state, dates]);
 
   const applyTool = (date: string, slotIdx: number, tool: Tool) => {
-    // Enforce course weekday rules — silently skip disallowed dates
+    // Enforce course rules — silently skip disallowed dates
     if (tool.kind === "course") {
-      const course = state.courses.find((c) => c.id === tool.courseId);
+      const active = state.classes.find((c) => c.id === activeClassId);
+      const course = active?.courses.find((c) => c.id === tool.courseId);
       if (course && !courseAllowedOn(course, date)) return;
     }
     setState((s) => ({
@@ -279,13 +282,17 @@ function Index() {
         // How many slots does this tool span?
         let span = 1;
         if (tool.kind === "course") {
-          const course = s.courses.find((c) => c.id === tool.courseId);
+          const course = cls.courses.find((c) => c.id === tool.courseId);
           span = Math.max(1, course?.durationSlots ?? 1);
         }
         for (let k = 0; k < span; k++) {
           const idx = slotIdx + k;
           if (idx >= s.slots.length) break;
           if (s.slots[idx].isBreak) continue; // never write into break slots
+          if (tool.kind === "course") {
+            const course = cls.courses.find((c) => c.id === tool.courseId);
+            if (course && !courseAllowedSlot(course, idx)) continue;
+          }
           const key = `${date}-${idx}`;
           if (tool.kind === "erase") delete grid[key];
           else if (tool.kind === "break") grid[key] = { kind: "break", label: "Break" };
@@ -376,7 +383,7 @@ function Index() {
         ...s,
         classes: [
           ...s.classes,
-          { id, name: `Class ${String.fromCharCode(65 + s.classes.length)}`, grid: {} },
+          { id, name: `Class ${String.fromCharCode(65 + s.classes.length)}`, grid: {}, courses: [] },
         ],
       };
     });
@@ -392,33 +399,49 @@ function Index() {
   const renameClass = (id: string, name: string) =>
     setState((s) => ({ ...s, classes: s.classes.map((c) => (c.id === id ? { ...c, name } : c)) }));
 
+  // Courses are per-class — all edits scope to the active class
   const addCourse = () =>
     setState((s) => ({
       ...s,
-      courses: [
-        ...s.courses,
-        {
-          id: `c${Date.now()}`,
-          name: "New Course",
-          faculty: "Faculty",
-          color: COLORS[s.courses.length % COLORS.length],
-          durationSlots: 1,
-        },
-      ],
+      classes: s.classes.map((cls) => {
+        if (cls.id !== activeClassId) return cls;
+        return {
+          ...cls,
+          courses: [
+            ...cls.courses,
+            {
+              id: `c${Date.now()}`,
+              name: "New Course",
+              faculty: "Faculty",
+              color: COLORS[cls.courses.length % COLORS.length],
+              durationSlots: 1,
+            },
+          ],
+        };
+      }),
     }));
   const updateCourse = (id: string, patch: Partial<Course>) =>
-    setState((s) => ({ ...s, courses: s.courses.map((c) => (c.id === id ? { ...c, ...patch } : c)) }));
+    setState((s) => ({
+      ...s,
+      classes: s.classes.map((cls) => {
+        if (cls.id !== activeClassId) return cls;
+        return {
+          ...cls,
+          courses: cls.courses.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+        };
+      }),
+    }));
   const removeCourse = (id: string) =>
     setState((s) => ({
       ...s,
-      courses: s.courses.filter((c) => c.id !== id),
       classes: s.classes.map((cls) => {
+        if (cls.id !== activeClassId) return cls;
         const grid = { ...cls.grid };
         Object.keys(grid).forEach((k) => {
           const cell = grid[k];
           if (cell.kind === "course" && cell.courseId === id) delete grid[k];
         });
-        return { ...cls, grid };
+        return { ...cls, grid, courses: cls.courses.filter((c) => c.id !== id) };
       }),
     }));
 
@@ -436,7 +459,7 @@ function Index() {
         else if (cell.kind === "break") row.push(`Break: ${cell.label}`);
         else if (cell.kind === "blocked") row.push(`Blocked: ${cell.label}`);
         else if (cell.kind === "course") {
-          const c = state.courses.find((x) => x.id === cell.courseId);
+          const c = cls.courses.find((x) => x.id === cell.courseId);
           row.push(c ? `${c.name} (${c.faculty})` : "");
         } else row.push("");
       });
