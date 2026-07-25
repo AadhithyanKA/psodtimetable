@@ -545,8 +545,6 @@ function Index() {
             </ol>
           </section>
         </aside>
-      </main>
-      {null}
 
         <section className="space-y-3">
           {hasConflicts && (
