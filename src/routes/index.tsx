@@ -36,6 +36,8 @@ type Course = {
   faculty: string;
   color: string;
   durationSlots: number;
+  // Target number of sessions per week (used by auto-fill). 0 = don't auto-fill.
+  weeklyPeriods?: number;
   // 0=Sun..6=Sat. undefined or empty = allowed on all days.
   allowedWeekdays?: number[];
   // Slot indices. undefined or empty = allowed in all periods.
@@ -127,9 +129,9 @@ function defaultState(): State {
   const from = isoToday();
   const to = addDays(from, 4);
   const seedCourses: Course[] = [
-    { id: "c1", name: "Mathematics", faculty: "Dr. Smith", color: COLORS[0], durationSlots: 1 },
-    { id: "c2", name: "Physics", faculty: "Dr. Jones", color: COLORS[2], durationSlots: 1 },
-    { id: "c3", name: "Chemistry", faculty: "Dr. Patel", color: COLORS[4], durationSlots: 1 },
+    { id: "c1", name: "Mathematics", faculty: "Dr. Smith", color: COLORS[0], durationSlots: 1, weeklyPeriods: 4 },
+    { id: "c2", name: "Physics", faculty: "Dr. Jones", color: COLORS[2], durationSlots: 1, weeklyPeriods: 3 },
+    { id: "c3", name: "Chemistry", faculty: "Dr. Patel", color: COLORS[4], durationSlots: 1, weeklyPeriods: 3 },
   ];
   const mkGrid = (): Record<string, Cell> => ({});
   const cloneCourses = (): Course[] => seedCourses.map((c) => ({ ...c }));
@@ -416,6 +418,7 @@ function Index() {
               faculty: "Faculty",
               color: COLORS[cls.courses.length % COLORS.length],
               durationSlots: 1,
+              weeklyPeriods: 3,
             },
           ],
         };
@@ -445,6 +448,234 @@ function Index() {
         return { ...cls, grid, courses: cls.courses.filter((c) => c.id !== id) };
       }),
     }));
+
+  // ------------ Auto-populate ------------
+  const autoPopulate = (opts: { overwrite: boolean }) => {
+    // ISO year+week key for grouping
+    const weekKey = (iso: string) => {
+      const d = new Date(iso + "T00:00:00");
+      const day = (d.getUTCDay() + 6) % 7; // Mon=0
+      const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day + 3));
+      const first = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+      const wk = 1 + Math.round(((t.getTime() - first.getTime()) / 86400000 - 3 + ((first.getUTCDay() + 6) % 7)) / 7);
+      return `${t.getUTCFullYear()}-W${wk}`;
+    };
+    setState((s) => {
+      // Deep-clone classes (grids only need shallow copies of Cell objects)
+      const classes: ClassData[] = s.classes.map((cls) => ({
+        ...cls,
+        grid: { ...cls.grid },
+      }));
+
+      // Optionally wipe existing course cells (keep breaks + blocks + manual? overwrite=true wipes only course cells)
+      if (opts.overwrite) {
+        classes.forEach((cls) => {
+          Object.keys(cls.grid).forEach((k) => {
+            const cell = cls.grid[k];
+            if (cell && cell.kind === "course") delete cls.grid[k];
+          });
+        });
+      }
+
+      // Global faculty occupancy
+      const facultyBusy: Record<string, Set<string>> = {};
+      classes.forEach((cls) => {
+        Object.entries(cls.grid).forEach(([key, cell]) => {
+          if (cell.kind === "course") {
+            const course = cls.courses.find((c) => c.id === cell.courseId);
+            if (course) (facultyBusy[key] ??= new Set()).add(course.faculty);
+          }
+        });
+      });
+
+      // Per-class occupancy already lives in cls.grid (any non-empty cell blocks placement).
+      const canPlace = (cls: ClassData, course: Course, date: string, start: number): boolean => {
+        if (!courseAllowedOn(course, date)) return false;
+        for (let i = 0; i < course.durationSlots; i++) {
+          const idx = start + i;
+          if (idx >= s.slots.length) return false;
+          if (s.slots[idx].isBreak) return false;
+          if (!courseAllowedSlot(course, idx)) return false;
+          const key = `${date}-${idx}`;
+          const existing = cls.grid[key];
+          if (existing && existing.kind !== "empty") return false;
+          if (facultyBusy[key]?.has(course.faculty)) return false;
+        }
+        return true;
+      };
+
+      // Group dates by ISO week
+      const weeks = new Map<string, string[]>();
+      dates.forEach((d) => {
+        const k = weekKey(d);
+        (weeks.get(k) ?? weeks.set(k, []).get(k)!).push(d);
+      });
+
+      // Round-robin across (class, course) to spread placements fairly
+      weeks.forEach((weekDates) => {
+        type Task = { cls: ClassData; course: Course; remaining: number; perDay: Record<string, number> };
+        const tasks: Task[] = [];
+        classes.forEach((cls) => {
+          cls.courses.forEach((course) => {
+            const target = course.weeklyPeriods ?? 0;
+            if (target <= 0) return;
+            // Count sessions already placed for this course in this week
+            let placed = 0;
+            const perDay: Record<string, number> = {};
+            weekDates.forEach((d) => {
+              perDay[d] = 0;
+              s.slots.forEach((_, i) => {
+                const cell = cls.grid[`${d}-${i}`];
+                if (cell?.kind === "course" && cell.courseId === course.id) {
+                  // Only count the starting slot to avoid double-counting duration
+                  const prev = cls.grid[`${d}-${i - 1}`];
+                  if (!prev || prev.kind !== "course" || prev.courseId !== course.id) {
+                    placed++;
+                    perDay[d]++;
+                  }
+                }
+              });
+            });
+            const remaining = Math.max(0, target - placed);
+            if (remaining > 0) tasks.push({ cls, course, remaining, perDay });
+          });
+        });
+
+        let progressed = true;
+        while (progressed) {
+          progressed = false;
+          // Sort tasks: most-remaining first, then fewer allowed weekdays (tighter constraint)
+          tasks.sort((a, b) => {
+            if (b.remaining !== a.remaining) return b.remaining - a.remaining;
+            const aw = (a.course.allowedWeekdays?.length || 7) + (a.course.allowedSlots?.length || s.slots.length);
+            const bw = (b.course.allowedWeekdays?.length || 7) + (b.course.allowedSlots?.length || s.slots.length);
+            return aw - bw;
+          });
+          for (const task of tasks) {
+            if (task.remaining <= 0) continue;
+            // Score candidates: prefer days with fewest sessions of this course, then earliest slot
+            let best: { date: string; slot: number; score: number } | null = null;
+            for (const date of weekDates) {
+              for (let sIdx = 0; sIdx < s.slots.length; sIdx++) {
+                if (!canPlace(task.cls, task.course, date, sIdx)) continue;
+                const score = (task.perDay[date] ?? 0) * 100 + sIdx;
+                if (!best || score < best.score) best = { date, slot: sIdx, score };
+              }
+            }
+            if (!best) continue;
+            // Place
+            for (let i = 0; i < task.course.durationSlots; i++) {
+              const key = `${best.date}-${best.slot + i}`;
+              task.cls.grid[key] = { kind: "course", courseId: task.course.id };
+              (facultyBusy[key] ??= new Set()).add(task.course.faculty);
+            }
+            task.perDay[best.date] = (task.perDay[best.date] ?? 0) + 1;
+            task.remaining--;
+            progressed = true;
+          }
+        }
+      });
+
+      return { ...s, classes };
+    });
+  };
+
+  // ------------ CSV block upload ------------
+  const downloadBlockTemplate = () => {
+    const nonBreakCount = state.slots.filter((sl) => !sl.isBreak).length || 8;
+    const sample = [
+      "# Auto-block template. Save as .csv and upload via 'Upload blocker CSV'.",
+      "# date   = YYYY-MM-DD",
+      `# periods = 'all' | comma/range list of period numbers (1..${nonBreakCount}), e.g. '1,2' or '5-${nonBreakCount}'`,
+      "# label  = optional text shown in the blocked cell (default: Block)",
+      "# scope  = optional 'all' (default) or exact class name; case-insensitive",
+      "date,periods,label,scope",
+      `${isoToday()},all,Holiday,all`,
+      `${addDays(isoToday(), 1)},7-${nonBreakCount},Sports,all`,
+      `${addDays(isoToday(), 2)},"1,2",Assembly,${state.classes[0]?.name ?? "Class A"}`,
+    ].join("\n");
+    const blob = new Blob([sample], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "block-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const parseCsvRow = (line: string): string[] => {
+    const out: string[] = [];
+    let cur = "";
+    let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQ) {
+        if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+        else if (ch === '"') inQ = false;
+        else cur += ch;
+      } else {
+        if (ch === '"') inQ = true;
+        else if (ch === ",") { out.push(cur); cur = ""; }
+        else cur += ch;
+      }
+    }
+    out.push(cur);
+    return out.map((v) => v.trim());
+  };
+
+  const importBlockCsv = async (file: File) => {
+    const text = await file.text();
+    const rawLines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+    if (rawLines.length === 0) { alert("CSV is empty."); return; }
+    const header = parseCsvRow(rawLines[0]).map((c) => c.toLowerCase());
+    const dateIdx = header.indexOf("date");
+    const periodsIdx = header.indexOf("periods");
+    const labelIdx = header.indexOf("label");
+    const scopeIdx = header.indexOf("scope");
+    if (dateIdx < 0) { alert("CSV missing required 'date' column."); return; }
+
+    const nonBreakIdxs = state.slots.map((sl, i) => ({ sl, i })).filter((x) => !x.sl.isBreak).map((x) => x.i);
+    const parsePeriods = (str: string): number[] => {
+      const s = (str || "all").trim().toLowerCase();
+      if (!s || s === "all" || s === "*") return nonBreakIdxs;
+      const nums = new Set<number>();
+      s.split(/[;,]/).forEach((p) => {
+        const m = p.trim().match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+        if (!m) return;
+        const a = parseInt(m[1], 10);
+        const b = m[2] ? parseInt(m[2], 10) : a;
+        for (let n = Math.min(a, b); n <= Math.max(a, b); n++) nums.add(n);
+      });
+      return [...nums].map((n) => nonBreakIdxs[n - 1]).filter((x): x is number => x !== undefined);
+    };
+
+    let applied = 0, skipped = 0;
+    const errors: string[] = [];
+    setState((s) => {
+      const classes: ClassData[] = s.classes.map((cls) => ({ ...cls, grid: { ...cls.grid } }));
+      rawLines.slice(1).forEach((line, i) => {
+        const cells = parseCsvRow(line);
+        const date = cells[dateIdx];
+        if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) { errors.push(`Row ${i + 2}: bad date "${date}"`); skipped++; return; }
+        const periods = parsePeriods(periodsIdx >= 0 ? cells[periodsIdx] : "all");
+        const label = (labelIdx >= 0 ? cells[labelIdx] : "") || "Block";
+        const scope = ((scopeIdx >= 0 ? cells[scopeIdx] : "") || "all").toLowerCase();
+        const targets = scope === "all" || scope === "*" || scope === ""
+          ? classes
+          : classes.filter((c) => c.name.toLowerCase() === scope);
+        if (targets.length === 0) { errors.push(`Row ${i + 2}: unknown scope "${cells[scopeIdx]}"`); skipped++; return; }
+        targets.forEach((cls) => {
+          periods.forEach((slotIdx) => {
+            cls.grid[`${date}-${slotIdx}`] = { kind: "blocked", label };
+            applied++;
+          });
+        });
+      });
+      return { ...s, classes };
+    });
+    const msg = `Applied ${applied} blocked cells.` + (skipped ? ` Skipped ${skipped} row(s).` : "") + (errors.length ? `\n\n${errors.slice(0, 5).join("\n")}` : "");
+    alert(msg);
+  };
 
   // Export
   const buildSheet = (cls: ClassData) => {
@@ -616,7 +847,7 @@ function Index() {
                         ×
                       </button>
                     </div>
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 px-3 py-2">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2 px-3 py-2">
                       <input
                         value={c.faculty}
                         onChange={(e) => updateCourse(c.id, { faculty: e.target.value })}
@@ -638,7 +869,25 @@ function Index() {
                           }
                           className="w-10 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
                         />
-                        <span>slot</span>
+                        <span>len</span>
+                      </label>
+                      <label
+                        title="Sessions per week (auto-fill target)"
+                        className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
+                        style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                      >
+                        <input
+                          type="number"
+                          min={0}
+                          value={c.weeklyPeriods ?? 0}
+                          onChange={(e) =>
+                            updateCourse(c.id, {
+                              weeklyPeriods: Math.max(0, parseInt(e.target.value || "0", 10)),
+                            })
+                          }
+                          className="w-10 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
+                        />
+                        <span>/wk</span>
                       </label>
                     </div>
                     <button
@@ -775,6 +1024,68 @@ function Index() {
                 >
                   Clear
                 </button>
+              </div>
+            </section>
+
+            {/* Auto-fill + CSV blocker */}
+            <section className="border border-dashed border-[#0d0d0d]/50 bg-[#f5f3ee] p-4">
+              <h3
+                className="mb-2 text-[11px] font-bold uppercase tracking-widest"
+                style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+              >
+                Auto-fill & Blocker
+              </h3>
+              <p className="mb-3 text-[11px] text-[#2d2d2d]/70">
+                Auto-fill packs each course into the week using its <b>/wk</b> target,
+                respecting duration, breaks, blocks, per-course rules, and faculty
+                overlaps across every class.
+              </p>
+              <div className="mb-3 grid grid-cols-2 gap-1">
+                <button
+                  onClick={() => autoPopulate({ overwrite: false })}
+                  className="border-2 border-[#0d0d0d] bg-white px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
+                >
+                  Fill Empty
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm("Clear all courses and re-generate?")) autoPopulate({ overwrite: true });
+                  }}
+                  className="border-2 border-[#0d0d0d] bg-[#0d0d0d] px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#f5f3ee] hover:opacity-90"
+                >
+                  Regenerate
+                </button>
+              </div>
+
+              <div className="border-t border-dashed border-[#0d0d0d]/30 pt-3">
+                <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/60">
+                  Block dates via CSV
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <button
+                    onClick={downloadBlockTemplate}
+                    className="border border-[#0d0d0d]/60 bg-white px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
+                  >
+                    Template
+                  </button>
+                  <label className="cursor-pointer border border-[#0d0d0d] bg-[#0d0d0d] px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#f5f3ee] hover:opacity-90">
+                    Upload CSV
+                    <input
+                      type="file"
+                      accept=".csv,text/csv"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) importBlockCsv(f);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+                <p className="mt-2 text-[10px] text-[#2d2d2d]/60">
+                  Columns: <code>date, periods, label, scope</code>. Periods are 1-based
+                  over non-break slots (e.g. <code>1,2</code> or <code>5-8</code> or <code>all</code>).
+                </p>
               </div>
             </section>
 
