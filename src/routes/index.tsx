@@ -687,6 +687,27 @@ function Index() {
         else weeks.set(k, [d]);
       });
 
+      // Per-course global budget: when a course has an explicit totalSessions
+      // target, cap placements across all weeks by (totalSessions - already placed
+      // within workingDates). Key = `${classId}::${courseId}`.
+      const totalBudget: Record<string, number> = {};
+      classes.forEach((cls) => {
+        cls.courses.forEach((course) => {
+          if (!course.totalSessions || course.totalSessions <= 0) return;
+          let already = 0;
+          workingDates.forEach((d) => {
+            s.slots.forEach((_, i) => {
+              const cell = cls.grid[`${d}-${i}`];
+              if (cell?.kind === "course" && cell.courseId === course.id) {
+                const prev = cls.grid[`${d}-${i - 1}`];
+                if (!prev || prev.kind !== "course" || prev.courseId !== course.id) already++;
+              }
+            });
+          });
+          totalBudget[`${cls.id}::${course.id}`] = Math.max(0, course.totalSessions - already);
+        });
+      });
+
       // Round-robin across (class, course) to spread placements fairly
       weeks.forEach((weekDates) => {
         type Task = { cls: ClassData; course: Course; remaining: number; perDay: Record<string, number>; perSlot: Record<number, number>; startsByDate: Record<string, number[]> };
@@ -708,6 +729,12 @@ function Index() {
               // If /wk is 0 or missing, use every allowed weekday × allowed-period opportunity.
               // This keeps added courses eligible even when the weekly target field is untouched.
               target = target > 0 ? Math.min(target, cap) : cap;
+            }
+            const budgetKey = `${cls.id}::${course.id}`;
+            if (course.totalSessions && course.totalSessions > 0) {
+              // Total-sessions mode: budget across all weeks.
+              const remainingBudget = totalBudget[budgetKey] ?? 0;
+              target = Math.min(cap, remainingBudget);
             }
             if (target <= 0) return;
             totalTarget += target;
@@ -772,6 +799,10 @@ function Index() {
             task.perDay[best.date] = (task.perDay[best.date] ?? 0) + 1;
             task.perSlot[best.slot] = (task.perSlot[best.slot] ?? 0) + 1;
             task.remaining--;
+            const bKey = `${task.cls.id}::${task.course.id}`;
+            if (bKey in totalBudget) {
+              totalBudget[bKey] = Math.max(0, (totalBudget[bKey] ?? 0) - 1);
+            }
             placedCount++;
             progressed = true;
           }
