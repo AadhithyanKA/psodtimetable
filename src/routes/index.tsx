@@ -1869,7 +1869,7 @@ function Index() {
                 {(activeClass?.courses ?? []).map((c) => {
                   const allowed =
                     courseAllowedOn(c, picker.date) &&
-                    courseAllowedSlot(c, picker.slotIdx);
+                    courseAllowedSlotOn(c, picker.slotIdx, picker.date);
                   const dateRange = c.fromDate || c.toDate ? `${c.fromDate ?? "start"} → ${c.toDate ?? "end"}` : null;
                   const ruleLabel =
                     dateRange ||
