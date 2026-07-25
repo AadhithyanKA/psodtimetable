@@ -508,7 +508,7 @@ function Index() {
         const explicitSlots = (course.allowedSlots ?? [])
           .filter((idx) => idx >= 0 && idx < s.slots.length && !s.slots[idx].isBreak)
           .sort((a, b) => a - b);
-        if (opts.strictRules) return explicitSlots;
+        if (opts.strictRules) return explicitSlots.length > 0 ? explicitSlots : allNonBreakStarts;
         return (explicitSlots.length > 0 ? explicitSlots : allNonBreakStarts).filter((idx) =>
           courseAllowedSlot(course, idx),
         );
@@ -558,9 +558,10 @@ function Index() {
             const availableDays = weekDates.filter((d) => courseAllowedOn(course, d)).length;
             const cap = availableDays * starts.length;
             if (opts.strictRules) {
-              // Strict mode uses explicit period rules only. If /wk is 0, fill every allowed
-              // day × selected period opportunity, capped by the actual available starts.
-              if (!course.allowedSlots || course.allowedSlots.length === 0 || starts.length === 0) return;
+              // Strict mode uses the course's rule periods. If no specific periods are selected,
+              // "All periods" means every non-break period. If /wk is 0, fill every allowed
+              // day × rule-period opportunity, capped by the actual available starts.
+              if (starts.length === 0) return;
               target = target > 0 ? Math.min(target, cap) : cap;
             } else if (cap > 0) {
               target = Math.min(target, cap);
@@ -612,7 +613,8 @@ function Index() {
             }
             if (!best) continue;
             // Place
-            for (let i = 0; i < task.course.durationSlots; i++) {
+            const span = Math.max(1, task.course.durationSlots ?? 1);
+            for (let i = 0; i < span; i++) {
               const key = `${best.date}-${best.slot + i}`;
               task.cls.grid[key] = { kind: "course", courseId: task.course.id };
               (facultyBusy[key] ??= new Set()).add(task.course.faculty);
@@ -634,7 +636,7 @@ function Index() {
         if (totalTarget === 0) {
           alert(
             opts.strictRules
-              ? "Nothing to auto-fill.\n\nOpen Available days for each course and select at least one period. If /wk is 0, Fill by Rules will now use all selected period opportunities automatically."
+              ? "Nothing to auto-fill.\n\nAdd at least one course and make sure the date range includes allowed weekdays with non-break periods."
               : "Nothing to auto-fill.\n\nSet a weekly target (the /wk field) on at least one course. Currently every course has weekly = 0.",
           );
         } else if (placedCount === 0) {
@@ -1179,9 +1181,8 @@ function Index() {
                 Auto-fill & Blocker
               </h3>
               <p className="mb-3 text-[11px] text-[#2d2d2d]/70">
-                Auto-fill packs each course into the week using its <b>/wk</b> target,
-                respecting duration, breaks, blocks, per-course rules, and faculty
-                overlaps across every class.
+                Auto-fill packs each course into the week using its rules. If <b>/wk</b> is 0,
+                Fill by Rules uses every allowed weekday and period opportunity.
               </p>
               <div className="mb-3 grid grid-cols-2 gap-1">
                 <button
@@ -1203,7 +1204,7 @@ function Index() {
                 <button
                   onClick={() => autoPopulate({ overwrite: false, strictRules: true })}
                   className="border-2 border-[#0d0d0d] bg-amber-200 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-amber-300"
-                  title="Only places each course in the exact periods you set in its Rules. If /wk is 0, uses every selected period opportunity."
+                  title="Places courses in their rule periods. If /wk is 0, uses every allowed period opportunity."
                 >
                   Fill by Rules
                 </button>
@@ -1793,7 +1794,7 @@ function Index() {
                           key={wd}
                           title={WEEKDAY_FULL[wd]}
                           onClick={() => {
-                            const base = wdAll ? [0, 1, 2, 3, 4, 5, 6] : [...wdRule];
+                            const base = wdAll ? [] : [...wdRule];
                             const next = base.includes(wd)
                               ? base.filter((x) => x !== wd)
                               : [...base, wd].sort();
@@ -1842,7 +1843,7 @@ function Index() {
                           key={i}
                           onClick={() => {
                             const allIdxs = nonBreakIdxs.map((x) => x.i);
-                            const base = slotAll ? [...allIdxs] : [...slotRule];
+                            const base = slotAll ? [] : [...slotRule];
                             const next = base.includes(i)
                               ? base.filter((x) => x !== i)
                               : [...base, i].sort((a, b) => a - b);
