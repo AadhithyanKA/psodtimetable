@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
+import XLSXStyle from "xlsx-js-style";
 
 export const Route = createFileRoute("/")({
   head: () => ({
