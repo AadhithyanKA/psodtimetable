@@ -327,7 +327,7 @@ const countCourseRuleCapacity = (course: Course, slots: Slot[], dateList: string
   return dateList.reduce((sum, date) => {
     if (!courseAllowedOn(course, date)) return sum;
     const starts = effectiveAllowedSlots(course, date) ?? nonBreakStarts;
-    return sum + starts.filter((start) => {
+    const validStarts = starts.filter((start) => {
       if (start < 0 || start >= slots.length || slots[start]?.isBreak) return false;
       for (let i = 0; i < span; i++) {
         const idx = start + i;
@@ -335,7 +335,15 @@ const countCourseRuleCapacity = (course: Course, slots: Slot[], dateList: string
         if (!courseAllowedSlotOn(course, idx, date)) return false;
       }
       return true;
-    }).length;
+    }).sort((a, b) => a - b);
+    let count = 0;
+    let nextFreeStart = 0;
+    validStarts.forEach((start) => {
+      if (start < nextFreeStart) return;
+      count++;
+      nextFreeStart = start + span;
+    });
+    return sum + count;
   }, 0);
 };
 
