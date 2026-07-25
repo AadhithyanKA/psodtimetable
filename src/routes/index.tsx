@@ -293,6 +293,7 @@ function Index() {
   };
 
   const onCellMouseDown = (date: string, slotIdx: number, e: React.MouseEvent) => {
+    if (state.slots[slotIdx]?.isBreak) { e.preventDefault(); return; }
     // Alt + right-click erases immediately
     if (e.button === 2 && e.altKey) {
       e.preventDefault();
@@ -773,11 +774,13 @@ function Index() {
                           <div className="font-semibold text-slate-800">{weekday}</div>
                           <div className="text-slate-500">{dstr}</div>
                         </th>
-                        {state.slots.map((_, i) => {
+                        {state.slots.map((sl, i) => {
                           if (!activeClass) return null;
                           const key = `${date}-${i}`;
                           const cell = activeClass.grid[key];
-                          const disp = cellDisplay(cell);
+                          const disp = sl.isBreak
+                            ? { text: "Break", bg: "#fef3c7", fg: "#92400e" }
+                            : cellDisplay(cell);
                           const isConflict = conflicts.has(`${activeClass.id}:${key}`);
                           return (
                             <td
@@ -785,9 +788,9 @@ function Index() {
                               onMouseDown={(e) => onCellMouseDown(date, i, e)}
                               onMouseEnter={(e) => onCellEnter(date, i, e)}
                               onContextMenu={(e) => e.preventDefault()}
-                              className={`cursor-pointer border p-2 text-xs align-middle ${
-                                isConflict ? "border-red-500 ring-2 ring-red-400" : "border-slate-200"
-                              }`}
+                              className={`border p-2 text-xs align-middle ${
+                                sl.isBreak ? "cursor-not-allowed" : "cursor-pointer"
+                              } ${isConflict ? "border-red-500 ring-2 ring-red-400" : "border-slate-200"}`}
                               style={{
                                 backgroundColor: disp.bg,
                                 color: disp.fg,
