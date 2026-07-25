@@ -30,7 +30,7 @@ type Cell =
   | { kind: "blocked"; label: string }
   | { kind: "course"; courseId: string };
 
-type Course = { id: string; name: string; faculty: string; color: string };
+type Course = { id: string; name: string; faculty: string; color: string; durationSlots: number };
 type ClassData = { id: string; name: string; grid: Record<string, Cell> };
 type State = {
   fromDate: string; // YYYY-MM-DD
@@ -78,9 +78,9 @@ function defaultState(): State {
     "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00",
   ];
   const courses: Course[] = [
-    { id: "c1", name: "Mathematics", faculty: "Dr. Smith", color: COLORS[0] },
-    { id: "c2", name: "Physics", faculty: "Dr. Jones", color: COLORS[2] },
-    { id: "c3", name: "Chemistry", faculty: "Dr. Patel", color: COLORS[4] },
+    { id: "c1", name: "Mathematics", faculty: "Dr. Smith", color: COLORS[0], durationSlots: 1 },
+    { id: "c2", name: "Physics", faculty: "Dr. Jones", color: COLORS[2], durationSlots: 1 },
+    { id: "c3", name: "Chemistry", faculty: "Dr. Patel", color: COLORS[4], durationSlots: 1 },
   ];
   const mkGrid = (): Record<string, Cell> => ({});
   return {
@@ -163,14 +163,57 @@ function Index() {
       classes: s.classes.map((cls) => {
         if (cls.id !== activeClassId) return cls;
         const grid = { ...cls.grid };
-        const key = `${date}-${slotIdx}`;
-        if (tool.kind === "erase") delete grid[key];
-        else if (tool.kind === "break") grid[key] = { kind: "break", label: "Break" };
-        else if (tool.kind === "blocked") grid[key] = { kind: "blocked", label: "Blocked" };
-        else grid[key] = { kind: "course", courseId: tool.courseId };
+        // How many slots does this tool span?
+        let span = 1;
+        if (tool.kind === "course") {
+          const course = s.courses.find((c) => c.id === tool.courseId);
+          span = Math.max(1, course?.durationSlots ?? 1);
+        }
+        for (let k = 0; k < span; k++) {
+          const idx = slotIdx + k;
+          if (idx >= s.slots.length) break;
+          const key = `${date}-${idx}`;
+          if (tool.kind === "erase") delete grid[key];
+          else if (tool.kind === "break") grid[key] = { kind: "break", label: "Break" };
+          else if (tool.kind === "blocked") grid[key] = { kind: "blocked", label: "Blocked" };
+          else grid[key] = { kind: "course", courseId: tool.courseId };
+        }
         return { ...cls, grid };
       }),
     }));
+  };
+
+  // Bulk block/break by weekday + slot indices
+  const applyBulk = (
+    weekdays: number[], // 0..6 (Sun..Sat)
+    slotIdxs: number[],
+    kind: "blocked" | "break" | "erase",
+    allClasses: boolean,
+  ) => {
+    setState((s) => {
+      const wdSet = new Set(weekdays);
+      const sSet = new Set(slotIdxs);
+      const targetDates = daysBetween(s.fromDate, s.toDate).filter((iso) =>
+        wdSet.has(new Date(iso + "T00:00:00").getDay()),
+      );
+      return {
+        ...s,
+        classes: s.classes.map((cls) => {
+          if (!allClasses && cls.id !== activeClassId) return cls;
+          const grid = { ...cls.grid };
+          targetDates.forEach((date) => {
+            s.slots.forEach((_, i) => {
+              if (!sSet.has(i)) return;
+              const key = `${date}-${i}`;
+              if (kind === "erase") delete grid[key];
+              else if (kind === "break") grid[key] = { kind: "break", label: "Break" };
+              else grid[key] = { kind: "blocked", label: "Blocked" };
+            });
+          });
+          return { ...cls, grid };
+        }),
+      };
+    });
   };
 
   const onCellMouseDown = (date: string, slotIdx: number, e: React.MouseEvent) => {
@@ -243,6 +286,7 @@ function Index() {
           name: "New Course",
           faculty: "Faculty",
           color: COLORS[s.courses.length % COLORS.length],
+          durationSlots: 1,
         },
       ],
     }));
