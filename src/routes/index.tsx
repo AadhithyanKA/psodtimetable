@@ -457,7 +457,7 @@ function Index() {
     }));
 
   // ------------ Auto-populate ------------
-  const autoPopulate = (opts: { overwrite: boolean }) => {
+  const autoPopulate = (opts: { overwrite: boolean; strictRules?: boolean }) => {
     // ISO year+week key for grouping
     const weekKey = (iso: string) => {
       const d = new Date(iso + "T00:00:00");
@@ -502,6 +502,11 @@ function Index() {
       // Per-class occupancy already lives in cls.grid (any non-empty cell blocks placement).
       const canPlace = (cls: ClassData, course: Course, date: string, start: number): boolean => {
         if (!courseAllowedOn(course, date)) return false;
+        if (opts.strictRules) {
+          // Strict mode: course MUST have an explicit periods rule and the start slot MUST be in it.
+          if (!course.allowedSlots || course.allowedSlots.length === 0) return false;
+          if (!course.allowedSlots.includes(start)) return false;
+        }
         for (let i = 0; i < course.durationSlots; i++) {
           const idx = start + i;
           if (idx >= s.slots.length) return false;
@@ -528,7 +533,15 @@ function Index() {
         const tasks: Task[] = [];
         classes.forEach((cls) => {
           cls.courses.forEach((course) => {
-            const target = course.weeklyPeriods ?? 0;
+            let target = course.weeklyPeriods ?? 0;
+            if (opts.strictRules) {
+              // In strict mode, skip courses without an explicit periods rule.
+              if (!course.allowedSlots || course.allowedSlots.length === 0) return;
+              // Cap target so it never exceeds the number of allowed (day × period) opportunities this week.
+              const allowedDays = weekDates.filter((d) => courseAllowedOn(course, d)).length;
+              const cap = allowedDays * course.allowedSlots.length;
+              target = Math.min(target, cap);
+            }
             if (target <= 0) return;
             totalTarget += target;
             // Count sessions already placed for this course in this week
@@ -1127,6 +1140,13 @@ function Index() {
                   Regenerate
                 </button>
               </div>
+              <button
+                onClick={() => autoPopulate({ overwrite: false, strictRules: true })}
+                className="mb-3 w-full border-2 border-[#0d0d0d] bg-amber-200 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-amber-300"
+                title="Only places each course in the exact periods you set in its Rules, capped by /wk."
+              >
+                Fill by Rules (exact periods)
+              </button>
 
               <div className="border-t border-dashed border-[#0d0d0d]/30 pt-3">
                 <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/60">
