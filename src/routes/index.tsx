@@ -786,14 +786,17 @@ function Index() {
         perDay: Record<string, number>;
         perSlot: Record<number, number>;
         startsByDate: Record<string, number[]>;
+        dateOrder: Record<string, number>;
         label: string;
       };
 
       const tasks: AutoTask[] = [];
       const addTask = (cls: ClassData, course: Course, dateList: string[], desiredSessions: number, label: string) => {
         const startsByDate: Record<string, number[]> = {};
+        const dateOrder: Record<string, number> = {};
         let possibleStarts = 0;
-        dateList.forEach((d) => {
+        dateList.forEach((d, dateIdx) => {
+          dateOrder[d] = dateIdx;
           if (!courseAllowedOn(course, d)) return;
           const starts = startSlotsFor(course, d).filter((start) => spanFitsCourse(course, start, d));
           startsByDate[d] = starts;
@@ -811,7 +814,7 @@ function Index() {
         const remaining = Math.max(0, desiredSessions - placed);
         totalTarget += remaining;
         if (remaining > 0) {
-          tasks.push({ cls, course, remaining, perDay, perSlot, startsByDate, label });
+          tasks.push({ cls, course, remaining, perDay, perSlot, startsByDate, dateOrder, label });
         }
       };
 
@@ -877,11 +880,15 @@ function Index() {
           for (const [date, starts] of Object.entries(task.startsByDate)) {
             for (const sIdx of starts) {
               if (!canPlace(task.cls, task.course, date, sIdx)) continue;
+              // Fill the nearest matching opportunity first: earlier date, then earlier period.
+              // Load-balancing is only a tie-breaker now, so rules never skip an open slot
+              // just to spread the timetable later in the range.
               const score =
-                (task.perDay[date] ?? 0) * 1000000 +
-                classDayLoad(task.cls, date) * 10000 +
-                (task.perSlot[sIdx] ?? 0) * 100 +
-                sIdx;
+                (task.dateOrder[date] ?? workingDates.length) * 100000000 +
+                sIdx * 100000 +
+                (task.perDay[date] ?? 0) * 1000 +
+                classDayLoad(task.cls, date) * 10 +
+                (task.perSlot[sIdx] ?? 0);
               if (!best || score < best.score) best = { date, slot: sIdx, score };
             }
           }
