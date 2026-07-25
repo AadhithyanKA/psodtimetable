@@ -311,6 +311,26 @@ const countCourseSessionsInDates = (
   return count;
 };
 
+const countCourseRuleCapacity = (course: Course, slots: Slot[], dateList: string[]): number => {
+  const nonBreakStarts = slots
+    .map((slot, idx) => ({ slot, idx }))
+    .filter(({ slot }) => !slot.isBreak)
+    .map(({ idx }) => idx);
+  const span = cleanDurationSlots(course.durationSlots, slots);
+  return dateList.reduce((sum, date) => {
+    if (!courseAllowedOn(course, date)) return sum;
+    const starts = effectiveAllowedSlots(course, date) ?? nonBreakStarts;
+    return sum + starts.filter((start) => {
+      if (start < 0 || start >= slots.length || slots[start]?.isBreak) return false;
+      for (let i = 0; i < span; i++) {
+        const idx = start + i;
+        if (idx >= slots.length || slots[idx]?.isBreak) return false;
+      }
+      return true;
+    }).length;
+  }, 0);
+};
+
 type Tool =
   | { kind: "course"; courseId: string }
   | { kind: "break" }
@@ -713,6 +733,38 @@ function Index() {
         return true;
       };
 
+      const unavailableReason = (cls: ClassData, course: Course, date: string, start: number): string => {
+        if (!courseAllowedOn(course, date)) return "outside course day/date rules";
+        if (!startSlotsFor(course, date).includes(start)) return "period not selected in rules";
+        if (!spanFitsCourse(course, start, date)) return "span crosses a break or disallowed period";
+        for (let i = 0; i < cleanDurationSlots(course.durationSlots, s.slots); i++) {
+          const idx = start + i;
+          const key = `${date}-${idx}`;
+          const existing = cls.grid[key];
+          if (existing?.kind === "blocked") return "slot is blocked";
+          if (existing?.kind === "break") return "slot is a break";
+          if (existing?.kind === "course") {
+            return existing.courseId === course.id
+              ? "selected rule slots already filled"
+              : "class already has another course there";
+          }
+          if (facultyBusy[key]?.has(course.faculty)) {
+            const busy = classes
+              .filter((other) => other.id !== cls.id)
+              .map((other) => {
+                const busyCell = other.grid[key];
+                if (busyCell?.kind !== "course") return null;
+                const busyCourse = other.courses.find((c) => c.id === busyCell.courseId);
+                if (busyCourse?.faculty !== course.faculty) return null;
+                return `${other.name}${busyCourse.name ? ` (${busyCourse.name})` : ""}`;
+              })
+              .filter((value): value is string => Boolean(value));
+            return busy.length > 0 ? `faculty busy in ${busy.join(", ")}` : "faculty busy in another class";
+          }
+        }
+        return "no open matching slot";
+      };
+
       const countPlacedStarts = (cls: ClassData, course: Course, dateList: string[]) => {
         let placed = 0;
         const perDay: Record<string, number> = {};
@@ -747,8 +799,12 @@ function Index() {
           startsByDate[d] = starts;
           possibleStarts += starts.length;
         });
-        if (desiredSessions <= 0 && opts.strictRules && possibleStarts > 0) {
-          desiredSessions = possibleStarts;
+        if (opts.strictRules && possibleStarts > 0) {
+          desiredSessions = desiredSessions <= 0
+            ? possibleStarts
+            : Math.min(desiredSessions, possibleStarts);
+        } else if (desiredSessions > 0 && possibleStarts > 0) {
+          desiredSessions = Math.min(desiredSessions, possibleStarts);
         }
         if (desiredSessions <= 0) return;
         const { placed, perDay, perSlot } = countPlacedStarts(cls, course, dateList);
@@ -848,8 +904,20 @@ function Index() {
       tasks.forEach((task) => {
         if (task.remaining <= 0) return;
         const openNow = availableCount(task);
+        const reasonCounts = new Map<string, number>();
+        Object.entries(task.startsByDate).forEach(([date, starts]) => {
+          starts.forEach((start) => {
+            if (canPlace(task.cls, task.course, date, start)) return;
+            const reason = unavailableReason(task.cls, task.course, date, start);
+            reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+          });
+        });
+        const rankedReasons = [...reasonCounts.entries()].sort((a, b) => b[1] - a[1]);
+        const topReason =
+          rankedReasons.find(([reason]) => reason !== "selected rule slots already filled")?.[0] ??
+          rankedReasons[0]?.[0];
         unmet.push(
-          `${task.cls.name} · ${task.course.name}: ${task.remaining} left${openNow === 0 ? " (no open rule slots)" : ` (${openNow} open rule slots)`}`,
+          `${task.cls.name} · ${task.course.name}: ${task.remaining} left${openNow === 0 ? ` (${topReason ?? "no open rule slots"})` : ` (${openNow} open rule slots)`}`,
         );
       });
 
@@ -885,6 +953,10 @@ function Index() {
             nonBreakCount === 0 ? "non-break periods" : "",
           ].filter(Boolean).join(", ");
           setAutoFillReport(`${mode}: nothing to place${reason ? ` — check ${reason}.` : "."}`);
+        } else if (unmet.length > 0) {
+          setAutoFillReport(
+            `${mode}: placed ${placedCount} of ${totalTarget}. Remaining: ${unmet.slice(0, 4).join("; ")}`,
+          );
         } else if (placedCount === 0) {
           if (firstVisibleClass) {
             const showingCount = activeVisibleCount > 0 ? activeVisibleCount : firstVisibleClass.count;
@@ -899,10 +971,6 @@ function Index() {
               `${mode}: no visible course slots were placed. Check that the selected dates match the course rules and that rule slots are not blocked.`,
             );
           }
-        } else if (unmet.length > 0) {
-          setAutoFillReport(
-            `${mode}: placed ${placedCount} of ${totalTarget}. Remaining: ${unmet.slice(0, 3).join("; ")}`,
-          );
         } else {
           setAutoFillReport(`${mode}: placed ${placedCount} of ${totalTarget} planned sessions.`);
         }
@@ -1235,8 +1303,12 @@ function Index() {
     };
     const planFor = (cls: ClassData) =>
       cls.courses.reduce((sum, c) => {
-        if (c.totalSessions && c.totalSessions > 0) return sum + c.totalSessions;
-        return sum + Math.max(0, c.weeklyPeriods ?? 0) * weekCount;
+        const requested = c.totalSessions && c.totalSessions > 0
+          ? c.totalSessions
+          : Math.max(0, c.weeklyPeriods ?? 0) * weekCount;
+        const capacity = countCourseRuleCapacity(c, state.slots, dates);
+        if (requested <= 0) return sum + capacity;
+        return sum + Math.min(requested, capacity);
       }, 0);
     const activePlanned = activeClass ? planFor(activeClass) : 0;
     const activePlaced = activeClass ? countPlaced(activeClass) : 0;
