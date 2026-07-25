@@ -729,6 +729,75 @@ function Index() {
         });
       }
 
+      const removeInvalidPlacements = (): number => {
+        let removed = 0;
+        const deleteCourseRun = (cls: ClassData, date: string, start: number, courseId: string) => {
+          let idx = start;
+          while (idx < s.slots.length) {
+            const key = `${date}-${idx}`;
+            const cell = cls.grid[key];
+            if (cell?.kind !== "course" || cell.courseId !== courseId) break;
+            delete cls.grid[key];
+            removed++;
+            idx++;
+          }
+        };
+
+        const removeRuleBreakers = () => {
+          classes.forEach((cls) => {
+            workingDates.forEach((date) => {
+              for (let slotIdx = 0; slotIdx < s.slots.length; slotIdx++) {
+                const key = `${date}-${slotIdx}`;
+                const cell = cls.grid[key];
+                if (cell?.kind !== "course") continue;
+                const prev = slotIdx > 0 ? cls.grid[`${date}-${slotIdx - 1}`] : undefined;
+                if (prev?.kind === "course" && prev.courseId === cell.courseId) continue;
+                const course = cls.courses.find((c) => c.id === cell.courseId);
+                const span = course ? cleanDurationSlots(course.durationSlots, s.slots) : 1;
+                const hasFullSpan = Boolean(course) && Array.from({ length: span }, (_, i) => {
+                  const idx = slotIdx + i;
+                  const part = cls.grid[`${date}-${idx}`];
+                  return idx < s.slots.length && !s.slots[idx]?.isBreak && part?.kind === "course" && part.courseId === cell.courseId;
+                }).every(Boolean);
+                if (!course || !hasFullSpan || !courseSpanFitsRules(course, s.slots, date, slotIdx)) {
+                  deleteCourseRun(cls, date, slotIdx, cell.courseId);
+                }
+              }
+            });
+          });
+        };
+
+        removeRuleBreakers();
+        workingDates.forEach((date) => {
+          s.slots.forEach((_, slotIdx) => {
+            const key = `${date}-${slotIdx}`;
+            const byFaculty = new Map<string, ClassData[]>();
+            classes.forEach((cls) => {
+              const cell = cls.grid[key];
+              if (cell?.kind !== "course") return;
+              const course = cls.courses.find((c) => c.id === cell.courseId);
+              if (!course) return;
+              const list = byFaculty.get(course.faculty) ?? [];
+              list.push(cls);
+              byFaculty.set(course.faculty, list);
+            });
+            byFaculty.forEach((busyClasses) => {
+              if (busyClasses.length < 2) return;
+              busyClasses.forEach((cls) => {
+                const cell = cls.grid[key];
+                if (cell?.kind !== "course") return;
+                delete cls.grid[key];
+                removed++;
+              });
+            });
+          });
+        });
+        removeRuleBreakers();
+        return removed;
+      };
+
+      const safetyRemoved = removeInvalidPlacements();
+
       const facultyBusy: Record<string, Set<string>> = {};
       classes.forEach((cls) => {
         Object.entries(cls.grid).forEach(([key, cell]) => {
