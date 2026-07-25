@@ -329,6 +329,7 @@ function Index() {
   const [bulkSlots, setBulkSlots] = useState<number[]>([]);
   const [bulkAllClasses, setBulkAllClasses] = useState(false);
   const [autoFillReport, setAutoFillReport] = useState<string>("");
+  const [pendingScrollClassId, setPendingScrollClassId] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -400,6 +401,16 @@ function Index() {
 
   const dates = useMemo(() => daysBetween(state.fromDate, state.toDate), [state.fromDate, state.toDate]);
   const activeClass = state.classes.find((c) => c.id === activeClassId) ?? state.classes[0];
+
+  useEffect(() => {
+    if (!pendingScrollClassId || pendingScrollClassId !== activeClass?.id) return;
+    const frame = window.requestAnimationFrame(() => {
+      const row = gridRef.current?.querySelector<HTMLElement>('[data-filled-row="true"]');
+      row?.scrollIntoView({ block: "start", inline: "nearest", behavior: "smooth" });
+      setPendingScrollClassId(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeClass, pendingScrollClassId, state.classes]);
 
   // Conflict detection across classes
   const conflicts = useMemo(() => {
@@ -858,19 +869,11 @@ function Index() {
       // Diagnostic feedback stays on screen instead of blocking with popups.
       queueMicrotask(() => {
         const mode = opts.strictRules ? "Fill by Rules" : opts.overwrite ? "Regenerate" : "Fill Empty";
-        const focusFirstFilledRow = () => {
-          window.requestAnimationFrame(() => {
-            window.requestAnimationFrame(() => {
-              const row = gridRef.current?.querySelector<HTMLElement>('[data-filled-row="true"]');
-              row?.scrollIntoView({ block: "center", inline: "nearest" });
-            });
-          });
-        };
         if (firstVisibleClass && activeVisibleCount === 0) {
           setActiveClassId(firstVisibleClass.id);
-          focusFirstFilledRow();
+          setPendingScrollClassId(firstVisibleClass.id);
         } else if (firstVisibleClass) {
-          focusFirstFilledRow();
+          setPendingScrollClassId(activeClassId);
         }
         if (totalTarget === 0) {
           const validDates = workingDates.length;
