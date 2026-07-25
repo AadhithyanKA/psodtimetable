@@ -32,13 +32,11 @@ type Cell =
 
 type Course = { id: string; name: string; faculty: string; color: string; durationSlots: number };
 type ClassData = { id: string; name: string; grid: Record<string, Cell> };
+type Slot = { start: string; end: string; isBreak?: boolean }; // 24h "HH:MM"
 type State = {
   fromDate: string; // YYYY-MM-DD
   toDate: string;
-  slots: string[]; // column labels
-  startTime: string; // "HH:MM" 24h
-  endTime: string; // "HH:MM" 24h
-  slotMinutes: number; // duration of one slot
+  slots: Slot[];
   courses: Course[];
   classes: ClassData[];
 };
@@ -47,7 +45,7 @@ const COLORS = [
   "#fdba74", "#fcd34d", "#86efac", "#67e8f9",
   "#93c5fd", "#c4b5fd", "#f9a8d4", "#a7f3d0",
 ];
-const STORAGE_KEY = "timetable-maker-v2";
+const STORAGE_KEY = "timetable-maker-v3";
 
 const isoToday = () => new Date().toISOString().slice(0, 10);
 const addDays = (iso: string, n: number) => {
@@ -86,24 +84,25 @@ const to12h = (mins: number): string => {
   const h = ((h24 + 11) % 12) + 1;
   return `${h}:${String(m).padStart(2, "0")} ${period}`;
 };
-const buildSlots = (start: string, end: string, dur: number): string[] => {
-  const s = parseHM(start);
-  const e = parseHM(end);
-  if (!(dur > 0) || e <= s) return [];
-  const out: string[] = [];
-  for (let t = s; t + dur <= e; t += dur) {
-    out.push(`${to12h(t)} – ${to12h(t + dur)}`);
-  }
-  return out;
-};
+const slotLabel = (s: Slot) => `${to12h(parseHM(s.start))} – ${to12h(parseHM(s.end))}`;
+const slotMinutes = (s: Slot) => Math.max(0, parseHM(s.end) - parseHM(s.start));
+
+const DEFAULT_SLOTS: Slot[] = [
+  { start: "08:50", end: "09:45" },
+  { start: "09:45", end: "10:40" },
+  { start: "10:40", end: "10:50", isBreak: true },
+  { start: "10:50", end: "11:45" },
+  { start: "11:45", end: "12:35" },
+  { start: "12:35", end: "13:25" },
+  { start: "13:25", end: "14:20" },
+  { start: "14:20", end: "14:30", isBreak: true },
+  { start: "14:30", end: "15:25" },
+  { start: "15:25", end: "16:15" },
+];
 
 function defaultState(): State {
   const from = isoToday();
   const to = addDays(from, 4);
-  const startTime = "09:00";
-  const endTime = "17:00";
-  const slotMinutes = 60;
-  const slots = buildSlots(startTime, endTime, slotMinutes);
   const courses: Course[] = [
     { id: "c1", name: "Mathematics", faculty: "Dr. Smith", color: COLORS[0], durationSlots: 1 },
     { id: "c2", name: "Physics", faculty: "Dr. Jones", color: COLORS[2], durationSlots: 1 },
@@ -113,10 +112,7 @@ function defaultState(): State {
   return {
     fromDate: from,
     toDate: to,
-    startTime,
-    endTime,
-    slotMinutes,
-    slots,
+    slots: DEFAULT_SLOTS,
     courses,
     classes: [
       { id: "k1", name: "Class A", grid: mkGrid() },
@@ -153,9 +149,6 @@ function Index() {
         const merged: State = {
           ...base,
           ...parsed,
-          startTime: parsed.startTime ?? base.startTime,
-          endTime: parsed.endTime ?? base.endTime,
-          slotMinutes: parsed.slotMinutes ?? base.slotMinutes,
           slots: parsed.slots ?? base.slots,
           courses: parsed.courses ?? base.courses,
           classes: parsed.classes ?? base.classes,
@@ -169,26 +162,42 @@ function Index() {
     if (hydrated) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state, hydrated]);
 
-  // Auto-regenerate slot labels + clip grids whenever time settings change.
-  useEffect(() => {
-    setState((s) => {
-      const nextSlots = buildSlots(s.startTime, s.endTime, s.slotMinutes);
-      const sameLen = nextSlots.length === s.slots.length;
-      const sameLabels = sameLen && nextSlots.every((v, i) => v === s.slots[i]);
-      if (sameLabels) return s;
-      const maxIdx = nextSlots.length;
-      const classes = s.classes.map((cls) => {
-        const grid: Record<string, Cell> = {};
-        Object.entries(cls.grid).forEach(([k, v]) => {
-          const m = k.match(/^(.+)-(\d+)$/);
-          if (!m) return;
-          if (parseInt(m[2], 10) < maxIdx) grid[k] = v;
-        });
-        return { ...cls, grid };
+  // Slot editors
+  const clipGrids = (classes: ClassData[], maxIdx: number): ClassData[] =>
+    classes.map((cls) => {
+      const grid: Record<string, Cell> = {};
+      Object.entries(cls.grid).forEach(([k, v]) => {
+        const m = k.match(/^(.+)-(\d+)$/);
+        if (!m) return;
+        if (parseInt(m[2], 10) < maxIdx) grid[k] = v;
       });
-      return { ...s, slots: nextSlots, classes };
+      return { ...cls, grid };
     });
-  }, [state.startTime, state.endTime, state.slotMinutes]);
+  const updateSlot = (i: number, patch: Partial<Slot>) =>
+    setState((s) => ({
+      ...s,
+      slots: s.slots.map((sl, idx) => (idx === i ? { ...sl, ...patch } : sl)),
+    }));
+  const addSlot = () =>
+    setState((s) => {
+      const last = s.slots[s.slots.length - 1];
+      const start = last ? last.end : "09:00";
+      const startM = parseHM(start);
+      const endM = Math.min(24 * 60 - 1, startM + 55);
+      const end = `${String(Math.floor(endM / 60)).padStart(2, "0")}:${String(endM % 60).padStart(2, "0")}`;
+      return { ...s, slots: [...s.slots, { start, end }] };
+    });
+  const removeSlot = (i: number) =>
+    setState((s) => ({
+      ...s,
+      slots: s.slots.filter((_, idx) => idx !== i),
+      classes: clipGrids(s.classes, s.slots.length - 1),
+    }));
+  const toggleSlotBreak = (i: number) =>
+    setState((s) => ({
+      ...s,
+      slots: s.slots.map((sl, idx) => (idx === i ? { ...sl, isBreak: !sl.isBreak } : sl)),
+    }));
 
   useEffect(() => {
     const up = () => setIsPainting(false);
@@ -237,6 +246,7 @@ function Index() {
         for (let k = 0; k < span; k++) {
           const idx = slotIdx + k;
           if (idx >= s.slots.length) break;
+          if (s.slots[idx].isBreak) continue; // never write into break slots
           const key = `${date}-${idx}`;
           if (tool.kind === "erase") delete grid[key];
           else if (tool.kind === "break") grid[key] = { kind: "break", label: "Break" };
@@ -269,6 +279,7 @@ function Index() {
           targetDates.forEach((date) => {
             s.slots.forEach((_, i) => {
               if (!sSet.has(i)) return;
+              if (s.slots[i].isBreak) return;
               const key = `${date}-${i}`;
               if (kind === "erase") delete grid[key];
               else if (kind === "break") grid[key] = { kind: "break", label: "Break" };
@@ -282,6 +293,7 @@ function Index() {
   };
 
   const onCellMouseDown = (date: string, slotIdx: number, e: React.MouseEvent) => {
+    if (state.slots[slotIdx]?.isBreak) { e.preventDefault(); return; }
     // Alt + right-click erases immediately
     if (e.button === 2 && e.altKey) {
       e.preventDefault();
@@ -374,11 +386,12 @@ function Index() {
   // Export
   const buildSheet = (cls: ClassData) => {
     const rows: string[][] = [];
-    rows.push(["Day / Date", ...state.slots]);
+    rows.push(["Day / Date", ...state.slots.map(slotLabel)]);
     dates.forEach((date) => {
       const { weekday, date: dstr } = dayLabel(date);
       const row = [`${weekday} ${dstr}`];
-      state.slots.forEach((_, i) => {
+      state.slots.forEach((sl, i) => {
+        if (sl.isBreak) { row.push("Break"); return; }
         const cell = cls.grid[`${date}-${i}`];
         if (!cell) row.push("");
         else if (cell.kind === "break") row.push(`Break: ${cell.label}`);
@@ -457,40 +470,6 @@ function Index() {
                 onChange={(e) => setState((s) => ({ ...s, toDate: e.target.value }))}
                 className="rounded border border-slate-300 px-2 py-1 text-sm"
               />
-            </label>
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
-              Day starts
-              <input
-                type="time"
-                value={state.startTime}
-                onChange={(e) => setState((s) => ({ ...s, startTime: e.target.value }))}
-                className="rounded border border-slate-300 px-2 py-1 text-sm"
-              />
-            </label>
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
-              Day ends
-              <input
-                type="time"
-                value={state.endTime}
-                onChange={(e) => setState((s) => ({ ...s, endTime: e.target.value }))}
-                className="rounded border border-slate-300 px-2 py-1 text-sm"
-              />
-            </label>
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
-              Class length
-              <select
-                value={state.slotMinutes}
-                onChange={(e) =>
-                  setState((s) => ({ ...s, slotMinutes: parseInt(e.target.value, 10) }))
-                }
-                className="rounded border border-slate-300 px-2 py-1 text-sm"
-              >
-                {[30, 40, 45, 50, 55, 60, 75, 90, 100, 120].map((m) => (
-                  <option key={m} value={m}>
-                    {m} min
-                  </option>
-                ))}
-              </select>
             </label>
             <button
               onClick={exportCSV}
@@ -652,7 +631,10 @@ function Index() {
                             )
                           }
                         />
-                        <span>{slot}</span>
+                        <span>
+                          {slotLabel(slot)}
+                          {slot.isBreak && <span className="ml-1 text-amber-700">(break)</span>}
+                        </span>
                       </label>
                     );
                   })}
@@ -708,6 +690,59 @@ function Index() {
               <li>Faculty double-booked across classes gets flagged red.</li>
             </ol>
           </section>
+
+          <section className="rounded-lg border border-slate-200 bg-white p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Time slots</h2>
+              <button onClick={addSlot} className="rounded bg-slate-900 px-2 py-1 text-xs text-white hover:bg-slate-800">
+                + Add
+              </button>
+            </div>
+            <div className="space-y-1 text-xs">
+              {state.slots.map((sl, i) => (
+                <div
+                  key={i}
+                  className={`flex items-center gap-1 rounded border p-1 ${
+                    sl.isBreak ? "border-amber-200 bg-amber-50" : "border-slate-200"
+                  }`}
+                >
+                  <span className="w-5 text-center text-slate-400">{i + 1}</span>
+                  <input
+                    type="time"
+                    value={sl.start}
+                    onChange={(e) => updateSlot(i, { start: e.target.value })}
+                    className="w-24 rounded border border-slate-200 px-1 py-0.5"
+                  />
+                  <input
+                    type="time"
+                    value={sl.end}
+                    onChange={(e) => updateSlot(i, { end: e.target.value })}
+                    className="w-24 rounded border border-slate-200 px-1 py-0.5"
+                  />
+                  <button
+                    onClick={() => toggleSlotBreak(i)}
+                    className={`rounded px-1 py-0.5 text-[10px] font-medium ${
+                      sl.isBreak
+                        ? "bg-amber-200 text-amber-900"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                    title="Toggle break"
+                  >
+                    Brk
+                  </button>
+                  <button
+                    onClick={() => removeSlot(i)}
+                    className="rounded px-1 py-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 text-[11px] text-slate-500">
+              Slots can be any length. Mark "Brk" for a break — those cells auto-fill and can't be assigned.
+            </div>
+          </section>
         </aside>
 
         <section className="space-y-3">
@@ -755,7 +790,7 @@ function Index() {
                   </div>
                 )}
                 <span className="text-xs text-slate-500">
-                  {state.slots.length} × {state.slotMinutes} min slots
+                  {state.slots.length} slots
                 </span>
               </div>
             </div>
@@ -770,10 +805,15 @@ function Index() {
                     {state.slots.map((slot, i) => (
                       <th
                         key={i}
-                        className="border border-slate-200 bg-slate-100 p-1 text-xs font-semibold text-slate-600"
+                        className={`border border-slate-200 p-1 text-xs font-semibold text-slate-600 ${
+                          slot.isBreak ? "bg-amber-100" : "bg-slate-100"
+                        }`}
                         style={{ minWidth: 120 }}
                       >
-                        <div className="whitespace-nowrap px-1 py-1 text-center">{slot}</div>
+                        <div className="whitespace-nowrap px-1 py-1 text-center">
+                          {slotLabel(slot)}
+                          {slot.isBreak && <div className="text-[10px] text-amber-700">Break</div>}
+                        </div>
                       </th>
                     ))}
                   </tr>
@@ -787,11 +827,13 @@ function Index() {
                           <div className="font-semibold text-slate-800">{weekday}</div>
                           <div className="text-slate-500">{dstr}</div>
                         </th>
-                        {state.slots.map((_, i) => {
+                        {state.slots.map((sl, i) => {
                           if (!activeClass) return null;
                           const key = `${date}-${i}`;
                           const cell = activeClass.grid[key];
-                          const disp = cellDisplay(cell);
+                          const disp = sl.isBreak
+                            ? { text: "Break", bg: "#fef3c7", fg: "#92400e" }
+                            : cellDisplay(cell);
                           const isConflict = conflicts.has(`${activeClass.id}:${key}`);
                           return (
                             <td
@@ -799,9 +841,9 @@ function Index() {
                               onMouseDown={(e) => onCellMouseDown(date, i, e)}
                               onMouseEnter={(e) => onCellEnter(date, i, e)}
                               onContextMenu={(e) => e.preventDefault()}
-                              className={`cursor-pointer border p-2 text-xs align-middle ${
-                                isConflict ? "border-red-500 ring-2 ring-red-400" : "border-slate-200"
-                              }`}
+                              className={`border p-2 text-xs align-middle ${
+                                sl.isBreak ? "cursor-not-allowed" : "cursor-pointer"
+                              } ${isConflict ? "border-red-500 ring-2 ring-red-400" : "border-slate-200"}`}
                               style={{
                                 backgroundColor: disp.bg,
                                 color: disp.fg,
@@ -837,7 +879,7 @@ function Index() {
             <div className="mb-3">
               <div className="text-xs uppercase tracking-wide text-slate-500">Assign slot</div>
               <div className="text-sm font-semibold text-slate-800">
-                {dayLabel(picker.date).weekday} {dayLabel(picker.date).date} · {state.slots[picker.slotIdx]}
+                {dayLabel(picker.date).weekday} {dayLabel(picker.date).date} · {state.slots[picker.slotIdx] ? slotLabel(state.slots[picker.slotIdx]) : ""}
               </div>
               <div className="text-xs text-slate-500">
                 Tip: after picking, drag across cells to fill more with the same choice.
