@@ -30,7 +30,15 @@ type Cell =
   | { kind: "blocked"; label: string }
   | { kind: "course"; courseId: string };
 
-type Course = { id: string; name: string; faculty: string; color: string; durationSlots: number };
+type Course = {
+  id: string;
+  name: string;
+  faculty: string;
+  color: string;
+  durationSlots: number;
+  // 0=Sun..6=Sat. undefined or empty = allowed on all days.
+  allowedWeekdays?: number[];
+};
 type ClassData = { id: string; name: string; grid: Record<string, Cell> };
 type Slot = { start: string; end: string; isBreak?: boolean }; // 24h "HH:MM"
 type State = {
