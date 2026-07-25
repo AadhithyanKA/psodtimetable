@@ -45,7 +45,7 @@ const COLORS = [
   "#fdba74", "#fcd34d", "#86efac", "#67e8f9",
   "#93c5fd", "#c4b5fd", "#f9a8d4", "#a7f3d0",
 ];
-const STORAGE_KEY = "timetable-maker-v3";
+const STORAGE_KEY = "timetable-maker-v4";
 
 const isoToday = () => new Date().toISOString().slice(0, 10);
 const addDays = (iso: string, n: number) => {
