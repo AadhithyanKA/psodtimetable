@@ -1225,6 +1225,23 @@ function Index() {
     };
   }, [activeClass, dates, state.slots, state.classes]);
 
+  // Per-course assigned session counts for the active class (session starts only).
+  const coursePlacementCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!activeClass) return map;
+    dates.forEach((d) => {
+      state.slots.forEach((_, i) => {
+        const cell = activeClass.grid[`${d}-${i}`];
+        if (cell?.kind !== "course") return;
+        const prev = activeClass.grid[`${d}-${i - 1}`];
+        if (!prev || prev.kind !== "course" || prev.courseId !== cell.courseId) {
+          map.set(cell.courseId, (map.get(cell.courseId) ?? 0) + 1);
+        }
+      });
+    });
+    return map;
+  }, [activeClass, dates, state.slots]);
+
   return (
     <div
       className="min-h-screen w-full bg-[#f5f3ee] text-[#2d2d2d]"
@@ -1394,7 +1411,12 @@ function Index() {
                           }}
                           className="w-12 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
                         />
-                        <span>total</span>
+                        <span>
+                          {(c.totalSessions ?? 0) > 0
+                            ? `${coursePlacementCounts.get(c.id) ?? 0} / ${c.totalSessions}`
+                            : `${coursePlacementCounts.get(c.id) ?? 0} placed`}
+                          {" "}· total
+                        </span>
                       </label>
                     </div>
                     <div className="grid grid-cols-2 gap-2 px-3 pb-2">
