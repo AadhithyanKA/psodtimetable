@@ -121,20 +121,20 @@ const DEFAULT_SLOTS: Slot[] = [
 function defaultState(): State {
   const from = isoToday();
   const to = addDays(from, 4);
-  const courses: Course[] = [
+  const seedCourses: Course[] = [
     { id: "c1", name: "Mathematics", faculty: "Dr. Smith", color: COLORS[0], durationSlots: 1 },
     { id: "c2", name: "Physics", faculty: "Dr. Jones", color: COLORS[2], durationSlots: 1 },
     { id: "c3", name: "Chemistry", faculty: "Dr. Patel", color: COLORS[4], durationSlots: 1 },
   ];
   const mkGrid = (): Record<string, Cell> => ({});
+  const cloneCourses = (): Course[] => seedCourses.map((c) => ({ ...c }));
   return {
     fromDate: from,
     toDate: to,
     slots: DEFAULT_SLOTS,
-    courses,
     classes: [
-      { id: "k1", name: "Class A", grid: mkGrid() },
-      { id: "k2", name: "Class B", grid: mkGrid() },
+      { id: "k1", name: "Class A", grid: mkGrid(), courses: cloneCourses() },
+      { id: "k2", name: "Class B", grid: mkGrid(), courses: cloneCourses() },
     ],
   };
 }
