@@ -1019,7 +1019,7 @@ function Index() {
                     }
                   });
                 });
-                return blockedOptions >= otherAvailability ? risk + 1 : risk;
+                return otherAvailability - blockedOptions < other.remaining ? risk + 1 : risk;
               }, 0);
               const avoidableRisk = currentAvailability > task.remaining ? wouldBlockAnotherRequiredSlot : 0;
               // Global earliest-first selection: choose the nearest valid date/period
