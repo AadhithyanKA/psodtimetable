@@ -1196,7 +1196,10 @@ function Index() {
       return n;
     };
     const planFor = (cls: ClassData) =>
-      cls.courses.reduce((sum, c) => sum + Math.max(0, c.weeklyPeriods ?? 0), 0) * weekCount;
+      cls.courses.reduce((sum, c) => {
+        if (c.totalSessions && c.totalSessions > 0) return sum + c.totalSessions;
+        return sum + Math.max(0, c.weeklyPeriods ?? 0) * weekCount;
+      }, 0);
     const activePlanned = activeClass ? planFor(activeClass) : 0;
     const activePlaced = activeClass ? countPlaced(activeClass) : 0;
     const totalPlanned = state.classes.reduce((s, c) => s + planFor(c), 0);
