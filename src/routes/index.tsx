@@ -59,7 +59,6 @@ const daysBetween = (from: string, to: string): string[] => {
   const end = new Date(to + "T00:00:00");
   if (end < start) return out;
   const diff = Math.round((end.getTime() - start.getTime()) / 86400000);
-  if (diff > 60) return out; // safety cap
   for (let i = 0; i <= diff; i++) out.push(addDays(from, i));
   return out;
 };
@@ -479,7 +478,7 @@ function Index() {
           )}
           {dates.length === 0 && (
             <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">
-              Pick a valid date range (max 60 days).
+              Pick a valid date range.
             </div>
           )}
 
