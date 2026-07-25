@@ -1231,6 +1231,31 @@ function Index() {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".aadhi,application/json"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) loadAadhi(f);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
+                title="Load a .aadhi file"
+              >
+                Load
+              </button>
+              <button
+                onClick={saveAadhi}
+                className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
+                title="Save as .aadhi file"
+              >
+                Save
+              </button>
               <button
                 onClick={exportCSV}
                 className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
