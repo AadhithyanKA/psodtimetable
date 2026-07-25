@@ -1155,6 +1155,40 @@ function Index() {
                         <span>/wk</span>
                       </label>
                     </div>
+                    <div className="grid grid-cols-2 gap-2 px-3 pb-2">
+                      <label
+                        className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
+                        style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                      >
+                        <span>From</span>
+                        <input
+                          type="date"
+                          value={c.fromDate ?? ""}
+                          onChange={(e) =>
+                            updateCourse(c.id, {
+                              fromDate: e.target.value || undefined,
+                            })
+                          }
+                          className="w-full border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-[10px] outline-none focus:border-[#0d0d0d]"
+                        />
+                      </label>
+                      <label
+                        className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
+                        style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                      >
+                        <span>To</span>
+                        <input
+                          type="date"
+                          value={c.toDate ?? ""}
+                          onChange={(e) =>
+                            updateCourse(c.id, {
+                              toDate: e.target.value || undefined,
+                            })
+                          }
+                          className="w-full border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-[10px] outline-none focus:border-[#0d0d0d]"
+                        />
+                      </label>
+                    </div>
                     <button
                       onClick={() => setRulesFor(c.id)}
                       className="flex w-full items-center justify-between border-t border-dashed border-[#0d0d0d]/15 px-3 py-2 text-left hover:bg-[#f5f3ee]"
