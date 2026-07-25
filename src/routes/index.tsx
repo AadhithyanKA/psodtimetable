@@ -1225,13 +1225,8 @@ function Index() {
     const weekCount = new Set(dates.map(isoWeekKey)).size;
     const countPlaced = (cls: ClassData) => {
       let n = 0;
-      dates.forEach((d) => {
-        state.slots.forEach((_, i) => {
-          const cell = cls.grid[`${d}-${i}`];
-          if (cell?.kind !== "course") return;
-          const prev = cls.grid[`${d}-${i - 1}`];
-          if (!prev || prev.kind !== "course" || prev.courseId !== cell.courseId) n++;
-        });
+      cls.courses.forEach((course) => {
+        n += countCourseSessionsInDates(cls.grid, course, state.slots, dates);
       });
       return n;
     };
@@ -1258,15 +1253,9 @@ function Index() {
   const coursePlacementCounts = useMemo(() => {
     const map = new Map<string, number>();
     if (!activeClass) return map;
-    dates.forEach((d) => {
-      state.slots.forEach((_, i) => {
-        const cell = activeClass.grid[`${d}-${i}`];
-        if (cell?.kind !== "course") return;
-        const prev = activeClass.grid[`${d}-${i - 1}`];
-        if (!prev || prev.kind !== "course" || prev.courseId !== cell.courseId) {
-          map.set(cell.courseId, (map.get(cell.courseId) ?? 0) + 1);
-        }
-      });
+    activeClass.courses.forEach((course) => {
+      const count = countCourseSessionsInDates(activeClass.grid, course, state.slots, dates);
+      if (count > 0) map.set(course.id, count);
     });
     return map;
   }, [activeClass, dates, state.slots]);
