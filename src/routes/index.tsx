@@ -499,19 +499,39 @@ function Index() {
         });
       });
 
-      // Per-class occupancy already lives in cls.grid (any non-empty cell blocks placement).
-      const canPlace = (cls: ClassData, course: Course, date: string, start: number): boolean => {
-        if (!courseAllowedOn(course, date)) return false;
-        if (opts.strictRules) {
-          // Strict mode: course MUST have an explicit periods rule and the start slot MUST be in it.
-          if (!course.allowedSlots || course.allowedSlots.length === 0) return false;
-          if (!course.allowedSlots.includes(start)) return false;
-        }
-        for (let i = 0; i < course.durationSlots; i++) {
+      const allNonBreakStarts = s.slots
+        .map((slot, idx) => ({ slot, idx }))
+        .filter(({ slot }) => !slot.isBreak)
+        .map(({ idx }) => idx);
+
+      const startSlotsFor = (course: Course): number[] => {
+        const explicitSlots = (course.allowedSlots ?? [])
+          .filter((idx) => idx >= 0 && idx < s.slots.length && !s.slots[idx].isBreak)
+          .sort((a, b) => a - b);
+        if (opts.strictRules) return explicitSlots;
+        return (explicitSlots.length > 0 ? explicitSlots : allNonBreakStarts).filter((idx) =>
+          courseAllowedSlot(course, idx),
+        );
+      };
+
+      const spanFitsCourse = (course: Course, start: number): boolean => {
+        for (let i = 0; i < Math.max(1, course.durationSlots); i++) {
           const idx = start + i;
           if (idx >= s.slots.length) return false;
           if (s.slots[idx].isBreak) return false;
-          if (!courseAllowedSlot(course, idx)) return false;
+          if (!opts.strictRules && !courseAllowedSlot(course, idx)) return false;
+        }
+        return true;
+      };
+
+      // Per-class occupancy already lives in cls.grid (any non-empty cell blocks placement).
+      const canPlace = (cls: ClassData, course: Course, date: string, start: number): boolean => {
+        if (!courseAllowedOn(course, date)) return false;
+        const possibleStarts = startSlotsFor(course);
+        if (!possibleStarts.includes(start)) return false;
+        if (!spanFitsCourse(course, start)) return false;
+        for (let i = 0; i < Math.max(1, course.durationSlots); i++) {
+          const idx = start + i;
           const key = `${date}-${idx}`;
           const existing = cls.grid[key];
           if (existing && existing.kind !== "empty") return false;
@@ -529,17 +549,20 @@ function Index() {
 
       // Round-robin across (class, course) to spread placements fairly
       weeks.forEach((weekDates) => {
-        type Task = { cls: ClassData; course: Course; remaining: number; perDay: Record<string, number> };
+        type Task = { cls: ClassData; course: Course; remaining: number; perDay: Record<string, number>; starts: number[] };
         const tasks: Task[] = [];
         classes.forEach((cls) => {
           cls.courses.forEach((course) => {
+            const starts = startSlotsFor(course).filter((start) => spanFitsCourse(course, start));
             let target = course.weeklyPeriods ?? 0;
+            const availableDays = weekDates.filter((d) => courseAllowedOn(course, d)).length;
+            const cap = availableDays * starts.length;
             if (opts.strictRules) {
-              // In strict mode, skip courses without an explicit periods rule.
-              if (!course.allowedSlots || course.allowedSlots.length === 0) return;
-              // Cap target so it never exceeds the number of allowed (day × period) opportunities this week.
-              const allowedDays = weekDates.filter((d) => courseAllowedOn(course, d)).length;
-              const cap = allowedDays * course.allowedSlots.length;
+              // Strict mode uses explicit period rules only. If /wk is 0, fill every allowed
+              // day × selected period opportunity, capped by the actual available starts.
+              if (!course.allowedSlots || course.allowedSlots.length === 0 || starts.length === 0) return;
+              target = target > 0 ? Math.min(target, cap) : cap;
+            } else if (cap > 0) {
               target = Math.min(target, cap);
             }
             if (target <= 0) return;
@@ -562,7 +585,7 @@ function Index() {
               });
             });
             const remaining = Math.max(0, target - placed);
-            if (remaining > 0) tasks.push({ cls, course, remaining, perDay });
+            if (remaining > 0) tasks.push({ cls, course, remaining, perDay, starts });
           });
         });
 
@@ -581,7 +604,7 @@ function Index() {
             // Score candidates: prefer days with fewest sessions of this course, then earliest slot
             let best: { date: string; slot: number; score: number } | null = null;
             for (const date of weekDates) {
-              for (let sIdx = 0; sIdx < s.slots.length; sIdx++) {
+              for (const sIdx of task.starts) {
                 if (!canPlace(task.cls, task.course, date, sIdx)) continue;
                 const score = (task.perDay[date] ?? 0) * 100 + sIdx;
                 if (!best || score < best.score) best = { date, slot: sIdx, score };
@@ -610,11 +633,15 @@ function Index() {
       queueMicrotask(() => {
         if (totalTarget === 0) {
           alert(
-            "Nothing to auto-fill.\n\nSet a weekly target (the /wk field) on at least one course. Currently every course has weekly = 0.",
+            opts.strictRules
+              ? "Nothing to auto-fill.\n\nOpen Available days for each course and select at least one period. If /wk is 0, Fill by Rules will now use all selected period opportunities automatically."
+              : "Nothing to auto-fill.\n\nSet a weekly target (the /wk field) on at least one course. Currently every course has weekly = 0.",
           );
         } else if (placedCount === 0) {
           alert(
-            "Auto-fill couldn't place anything.\n\nCheck: date range, course rules (allowed days/periods), and that empty slots exist (or use Regenerate).",
+            opts.strictRules
+              ? "Auto-fill couldn't place anything.\n\nCheck that selected periods match the selected weekdays and that the cells are empty. If the timetable already has entries, use Regenerate by Rules."
+              : "Auto-fill couldn't place anything.\n\nCheck: date range, course rules (allowed days/periods), and that empty slots exist (or use Regenerate).",
           );
         } else if (unmet.length > 0) {
           alert(
@@ -1172,13 +1199,26 @@ function Index() {
                   Regenerate
                 </button>
               </div>
-              <button
-                onClick={() => autoPopulate({ overwrite: false, strictRules: true })}
-                className="mb-3 w-full border-2 border-[#0d0d0d] bg-amber-200 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-amber-300"
-                title="Only places each course in the exact periods you set in its Rules, capped by /wk."
-              >
-                Fill by Rules (exact periods)
-              </button>
+              <div className="mb-3 grid grid-cols-2 gap-1">
+                <button
+                  onClick={() => autoPopulate({ overwrite: false, strictRules: true })}
+                  className="border-2 border-[#0d0d0d] bg-amber-200 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-amber-300"
+                  title="Only places each course in the exact periods you set in its Rules. If /wk is 0, uses every selected period opportunity."
+                >
+                  Fill by Rules
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm("Clear all courses and fill only by course rules?")) {
+                      autoPopulate({ overwrite: true, strictRules: true });
+                    }
+                  }}
+                  className="border-2 border-[#0d0d0d] bg-amber-300 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-amber-400"
+                  title="Clears current course entries first, then fills only in the selected rule periods."
+                >
+                  Regen Rules
+                </button>
+              </div>
 
               <div className="border-t border-dashed border-[#0d0d0d]/30 pt-3">
                 <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/60">
