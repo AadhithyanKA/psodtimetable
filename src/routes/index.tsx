@@ -311,6 +311,26 @@ const countCourseSessionsInDates = (
   return count;
 };
 
+const countCourseRuleCapacity = (course: Course, slots: Slot[], dateList: string[]): number => {
+  const nonBreakStarts = slots
+    .map((slot, idx) => ({ slot, idx }))
+    .filter(({ slot }) => !slot.isBreak)
+    .map(({ idx }) => idx);
+  const span = cleanDurationSlots(course.durationSlots, slots);
+  return dateList.reduce((sum, date) => {
+    if (!courseAllowedOn(course, date)) return sum;
+    const starts = effectiveAllowedSlots(course, date) ?? nonBreakStarts;
+    return sum + starts.filter((start) => {
+      if (start < 0 || start >= slots.length || slots[start]?.isBreak) return false;
+      for (let i = 0; i < span; i++) {
+        const idx = start + i;
+        if (idx >= slots.length || slots[idx]?.isBreak) return false;
+      }
+      return true;
+    }).length;
+  }, 0);
+};
+
 type Tool =
   | { kind: "course"; courseId: string }
   | { kind: "break" }
@@ -1283,8 +1303,12 @@ function Index() {
     };
     const planFor = (cls: ClassData) =>
       cls.courses.reduce((sum, c) => {
-        if (c.totalSessions && c.totalSessions > 0) return sum + c.totalSessions;
-        return sum + Math.max(0, c.weeklyPeriods ?? 0) * weekCount;
+        const requested = c.totalSessions && c.totalSessions > 0
+          ? c.totalSessions
+          : Math.max(0, c.weeklyPeriods ?? 0) * weekCount;
+        const capacity = countCourseRuleCapacity(c, state.slots, dates);
+        if (requested <= 0) return sum + capacity;
+        return sum + Math.min(requested, capacity);
       }, 0);
     const activePlanned = activeClass ? planFor(activeClass) : 0;
     const activePlaced = activeClass ? countPlaced(activeClass) : 0;
