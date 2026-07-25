@@ -939,12 +939,66 @@ function Index() {
     return rows;
   };
   const exportExcel = () => {
-    const wb = XLSX.utils.book_new();
+    const wb = XLSXStyle.utils.book_new();
+    const hexClean = (h: string) => (h || "").replace("#", "").padStart(6, "0").slice(-6).toUpperCase();
+    const textColorFor = (hex: string) => {
+      const h = hexClean(hex);
+      const r = parseInt(h.slice(0, 2), 16);
+      const g = parseInt(h.slice(2, 4), 16);
+      const b = parseInt(h.slice(4, 6), 16);
+      const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      return lum > 0.6 ? "111111" : "FFFFFF";
+    };
+    const border = { style: "thin", color: { rgb: "CCCCCC" } } as const;
+    const baseBorders = { top: border, bottom: border, left: border, right: border };
     state.classes.forEach((cls) => {
-      const ws = XLSX.utils.aoa_to_sheet(buildSheet(cls));
-      XLSX.utils.book_append_sheet(wb, ws, cls.name.slice(0, 31) || "Class");
+      const data = buildSheet(cls);
+      const ws = XLSXStyle.utils.aoa_to_sheet(data);
+      const numCols = data[0].length;
+      ws["!cols"] = Array.from({ length: numCols }, (_, i) => ({ wch: i === 0 ? 18 : 20 }));
+      ws["!rows"] = data.map((_, i) => ({ hpt: i === 0 ? 24 : 32 }));
+      for (let r = 0; r < data.length; r++) {
+        for (let c = 0; c < numCols; c++) {
+          const addr = XLSXStyle.utils.encode_cell({ r, c });
+          if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+          const cellStyle: Record<string, unknown> = {
+            alignment: { horizontal: "center", vertical: "center", wrapText: true },
+            border: baseBorders,
+            font: { name: "Calibri", sz: 11 },
+          };
+          if (r === 0 || c === 0) {
+            cellStyle.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } };
+            cellStyle.fill = { patternType: "solid", fgColor: { rgb: "0D0D0D" } };
+          } else {
+            const date = dates[r - 1];
+            const slotIdx = c - 1;
+            const key = `${date}-${slotIdx}`;
+            const isConflict = conflicts.has(`${cls.id}:${key}`);
+            const sl = state.slots[slotIdx];
+            const cell = cls.grid[key];
+            if (isConflict) {
+              cellStyle.fill = { patternType: "solid", fgColor: { rgb: "FECACA" } };
+              cellStyle.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: "991B1B" } };
+            } else if (sl?.isBreak || cell?.kind === "break") {
+              cellStyle.fill = { patternType: "solid", fgColor: { rgb: "FDE68A" } };
+              cellStyle.font = { name: "Calibri", sz: 11, italic: true, color: { rgb: "78350F" } };
+            } else if (cell?.kind === "blocked") {
+              cellStyle.fill = { patternType: "solid", fgColor: { rgb: "374151" } };
+              cellStyle.font = { name: "Calibri", sz: 11, color: { rgb: "FFFFFF" } };
+            } else if (cell?.kind === "course") {
+              const course = cls.courses.find((x) => x.id === cell.courseId);
+              const bg = hexClean(course?.color ?? "#DDDDDD");
+              cellStyle.fill = { patternType: "solid", fgColor: { rgb: bg } };
+              cellStyle.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: textColorFor(bg) } };
+            }
+          }
+          (ws[addr] as { s?: unknown }).s = cellStyle;
+        }
+      }
+      ws["!freeze"] = { xSplit: 1, ySplit: 1 };
+      XLSXStyle.utils.book_append_sheet(wb, ws, cls.name.slice(0, 31) || "Class");
     });
-    XLSX.writeFile(wb, `timetable_${state.fromDate}_to_${state.toDate}.xlsx`);
+    XLSXStyle.writeFile(wb, `timetable_${state.fromDate}_to_${state.toDate}.xlsx`);
   };
   const exportCSV = () => {
     state.classes.forEach((cls) => {
