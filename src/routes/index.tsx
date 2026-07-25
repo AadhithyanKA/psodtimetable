@@ -657,9 +657,36 @@ function Index() {
         });
       });
 
+      const visibleCourseCounts = classes.map((cls) => {
+        const count = workingDates.reduce((sum, date) => {
+          return sum + s.slots.reduce((slotSum, _, slotIdx) => {
+            const cell = cls.grid[`${date}-${slotIdx}`];
+            return slotSum + (cell?.kind === "course" ? 1 : 0);
+          }, 0);
+        }, 0);
+        return { id: cls.id, name: cls.name, count };
+      });
+      const activeVisibleCount =
+        visibleCourseCounts.find((item) => item.id === activeClassId)?.count ?? 0;
+      const firstVisibleClass = visibleCourseCounts.find((item) => item.count > 0);
+
       // Diagnostic feedback stays on screen instead of blocking with popups.
       queueMicrotask(() => {
         const mode = opts.strictRules ? "Fill by Rules" : opts.overwrite ? "Regenerate" : "Fill Empty";
+        const focusFirstFilledRow = () => {
+          window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => {
+              const row = gridRef.current?.querySelector<HTMLElement>('[data-filled-row="true"]');
+              row?.scrollIntoView({ block: "center", inline: "nearest" });
+            });
+          });
+        };
+        if (firstVisibleClass && activeVisibleCount === 0) {
+          setActiveClassId(firstVisibleClass.id);
+          focusFirstFilledRow();
+        } else if (firstVisibleClass) {
+          focusFirstFilledRow();
+        }
         if (totalTarget === 0) {
           const validDates = workingDates.length;
           const courseCount = classes.reduce((sum, cls) => sum + cls.courses.length, 0);
@@ -671,9 +698,19 @@ function Index() {
           ].filter(Boolean).join(", ");
           setAutoFillReport(`${mode}: nothing to place${reason ? ` — check ${reason}.` : "."}`);
         } else if (placedCount === 0) {
-          setAutoFillReport(
-            `${mode}: timetable already has ${totalTarget} matching session${totalTarget === 1 ? "" : "s"}, or the remaining rule slots are blocked.`,
-          );
+          if (firstVisibleClass) {
+            const showingCount = activeVisibleCount > 0 ? activeVisibleCount : firstVisibleClass.count;
+            const showingClass = activeVisibleCount > 0
+              ? visibleCourseCounts.find((item) => item.id === activeClassId)?.name
+              : firstVisibleClass.name;
+            setAutoFillReport(
+              `${mode}: already filled — showing ${showingCount} course slot${showingCount === 1 ? "" : "s"}${showingClass ? ` in ${showingClass}` : ""}.`,
+            );
+          } else {
+            setAutoFillReport(
+              `${mode}: no visible course slots were placed. Check that the selected dates match the course rules and that rule slots are not blocked.`,
+            );
+          }
         } else if (unmet.length > 0) {
           setAutoFillReport(
             `${mode}: placed ${placedCount} of ${totalTarget}. Remaining: ${unmet.slice(0, 3).join("; ")}`,
@@ -910,6 +947,15 @@ function Index() {
   };
 
   const hasConflicts = conflicts.size > 0;
+  const activeVisibleCourseSlots = useMemo(() => {
+    if (!activeClass) return 0;
+    return dates.reduce((sum, date) => {
+      return sum + state.slots.reduce((slotSum, _, slotIdx) => {
+        const cell = activeClass.grid[`${date}-${slotIdx}`];
+        return slotSum + (cell?.kind === "course" ? 1 : 0);
+      }, 0);
+    }, 0);
+  }, [activeClass, dates, state.slots]);
 
   return (
     <div
@@ -1452,7 +1498,7 @@ function Index() {
               className="text-[11px] text-[#2d2d2d]/60"
               style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
             >
-              {dates.length} day{dates.length === 1 ? "" : "s"} · {state.slots.length} slots
+              {dates.length} day{dates.length === 1 ? "" : "s"} · {state.slots.length} slots · {activeVisibleCourseSlots} filled
             </span>
             {armedTool && (
               <div className="ml-auto flex items-center gap-2 border-2 border-[#0d0d0d] bg-white px-2 py-1">
@@ -1539,8 +1585,11 @@ function Index() {
                 <tbody className="bg-white">
                   {dates.map((date) => {
                     const { weekday, date: dstr } = dayLabel(date);
+                    const rowHasCourse = activeClass
+                      ? state.slots.some((_, slotIdx) => activeClass.grid[`${date}-${slotIdx}`]?.kind === "course")
+                      : false;
                     return (
-                      <tr key={date}>
+                      <tr key={date} data-filled-row={rowHasCourse ? "true" : undefined}>
                         <th
                           className="sticky left-0 z-10 border-2 border-[#0d0d0d] bg-[#e8e4dd] p-3 text-left align-middle"
                           style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
