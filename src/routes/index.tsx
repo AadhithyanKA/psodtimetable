@@ -490,11 +490,11 @@ function Index() {
     });
   };
 
-  const cellDisplay = (cell: Cell | undefined) => {
+  const cellDisplay = (cell: Cell | undefined, courses: Course[]) => {
     if (!cell || cell.kind === "empty") return { text: "", bg: "#fff", fg: "#94a3b8" };
     if (cell.kind === "break") return { text: cell.label, bg: "#fef3c7", fg: "#92400e" };
     if (cell.kind === "blocked") return { text: cell.label, bg: "#e5e7eb", fg: "#374151" };
-    const course = state.courses.find((c) => c.id === cell.courseId);
+    const course = courses.find((c) => c.id === cell.courseId);
     return {
       text: course ? `${course.name}\n${course.faculty}` : "?",
       bg: course?.color ?? "#ddd",
