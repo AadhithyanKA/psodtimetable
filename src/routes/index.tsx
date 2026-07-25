@@ -782,8 +782,8 @@ function Index() {
         for (const task of tasks) {
           if (task.remaining <= 0) continue;
           let best: { date: string; slot: number; score: number } | null = null;
-          Object.entries(task.startsByDate).forEach(([date, starts]) => {
-            starts.forEach((sIdx) => {
+          for (const [date, starts] of Object.entries(task.startsByDate)) {
+            for (const sIdx of starts) {
               if (!canPlace(task.cls, task.course, date, sIdx)) return;
               const score =
                 (task.perDay[date] ?? 0) * 1000000 +
@@ -791,8 +791,8 @@ function Index() {
                 (task.perSlot[sIdx] ?? 0) * 100 +
                 sIdx;
               if (!best || score < best.score) best = { date, slot: sIdx, score };
-            });
-          });
+            }
+          }
           if (!best) continue;
 
           const span = cleanDurationSlots(task.course.durationSlots, s.slots);
