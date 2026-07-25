@@ -602,6 +602,56 @@ function Index() {
                         <span>slot</span>
                       </label>
                     </div>
+                    <div className="border-t border-dashed border-[#0d0d0d]/15 px-3 py-2">
+                      <div className="mb-1 flex items-center justify-between">
+                        <span
+                          className="text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/60"
+                          style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                        >
+                          Available days
+                        </span>
+                        {c.allowedWeekdays && c.allowedWeekdays.length > 0 && (
+                          <button
+                            onClick={() => updateCourse(c.id, { allowedWeekdays: [] })}
+                            className="text-[9px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                          >
+                            All days
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex gap-1">
+                        {WEEKDAY_LABELS.map((lbl, wd) => {
+                          const rule = c.allowedWeekdays ?? [];
+                          const allAllowed = rule.length === 0;
+                          const active = allAllowed || rule.includes(wd);
+                          return (
+                            <button
+                              key={wd}
+                              title={WEEKDAY_FULL[wd]}
+                              onClick={() => {
+                                const base = allAllowed ? [0, 1, 2, 3, 4, 5, 6] : [...rule];
+                                const next = base.includes(wd)
+                                  ? base.filter((x) => x !== wd)
+                                  : [...base, wd].sort();
+                                // If user re-selects all 7, treat as "all days" (undefined)
+                                updateCourse(c.id, {
+                                  allowedWeekdays: next.length === 7 ? [] : next,
+                                });
+                              }}
+                              className={
+                                "flex h-6 w-6 items-center justify-center border text-[10px] font-bold transition-colors " +
+                                (active
+                                  ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
+                                  : "border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/40 hover:border-[#0d0d0d]/50")
+                              }
+                              style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                            >
+                              {lbl}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
