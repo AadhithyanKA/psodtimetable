@@ -806,6 +806,7 @@ function Index() {
           if (course) (facultyBusy[key] ??= new Set()).add(course.faculty);
         });
       });
+      const globalDateOrder = new Map(workingDates.map((date, index) => [date, index]));
 
       const allNonBreakStarts = s.slots
         .map((slot, idx) => ({ slot, idx }))
@@ -995,11 +996,38 @@ function Index() {
             for (const sIdx of starts) {
               if (!canPlace(task.cls, task.course, date, sIdx)) continue;
               const taskIndex = tasks.indexOf(task);
+              const span = cleanDurationSlots(task.course.durationSlots, s.slots);
+              const currentAvailability = availability.get(task) ?? 0;
+              const wouldBlockAnotherRequiredSlot = tasks.reduce((risk, other) => {
+                if (other === task || other.remaining <= 0) return risk;
+                const otherAvailability = availability.get(other) ?? 0;
+                if (otherAvailability === 0) return risk;
+                let blockedOptions = 0;
+                Object.entries(other.startsByDate).forEach(([otherDate, otherStarts]) => {
+                  otherStarts.forEach((otherStart) => {
+                    if (!canPlace(other.cls, other.course, otherDate, otherStart)) return;
+                    const otherSpan = cleanDurationSlots(other.course.durationSlots, s.slots);
+                    let overlaps = false;
+                    for (let a = 0; a < span; a++) {
+                      for (let b = 0; b < otherSpan; b++) {
+                        if (date === otherDate && sIdx + a === otherStart + b) overlaps = true;
+                      }
+                    }
+                    if (!overlaps) return;
+                    if (other.cls.id === task.cls.id || other.course.faculty === task.course.faculty) {
+                      blockedOptions++;
+                    }
+                  });
+                });
+                return blockedOptions >= otherAvailability ? risk + 1 : risk;
+              }, 0);
+              const avoidableRisk = currentAvailability > task.remaining ? wouldBlockAnotherRequiredSlot : 0;
               // Global earliest-first selection: choose the nearest valid date/period
               // across every class/course before considering spread or course priority.
               // This prevents an open rule slot from being skipped while a later slot is used.
               const score =
-                (workingDates.indexOf(date) >= 0 ? workingDates.indexOf(date) : workingDates.length) * 1000000000 +
+                avoidableRisk * 1000000000000 +
+                (globalDateOrder.get(date) ?? workingDates.length) * 1000000000 +
                 sIdx * 1000000 +
                 (task.dateOrder[date] ?? workingDates.length) * 10000 +
                 taskIndex * 100 +
