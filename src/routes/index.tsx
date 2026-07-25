@@ -1143,10 +1143,20 @@ function Index() {
                   </div>
                 )}
                 {(activeClass?.courses ?? []).map((c) => {
-                  const allowed = courseAllowedOn(c, picker.date);
+                  const allowed =
+                    courseAllowedOn(c, picker.date) &&
+                    courseAllowedSlot(c, picker.slotIdx);
                   const ruleLabel =
-                    c.allowedWeekdays && c.allowedWeekdays.length > 0
-                      ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(", ")
+                    (c.allowedWeekdays && c.allowedWeekdays.length > 0) ||
+                    (c.allowedSlots && c.allowedSlots.length > 0)
+                      ? [
+                          c.allowedWeekdays && c.allowedWeekdays.length > 0
+                            ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(",")
+                            : "any day",
+                          c.allowedSlots && c.allowedSlots.length > 0
+                            ? "P" + c.allowedSlots.map((i) => i + 1).join(",")
+                            : "any period",
+                        ].join(" · ")
                       : null;
                   return (
                     <button
