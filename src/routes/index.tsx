@@ -158,6 +158,27 @@ function Index() {
     if (hydrated) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state, hydrated]);
 
+  // Auto-regenerate slot labels + clip grids whenever time settings change.
+  useEffect(() => {
+    setState((s) => {
+      const nextSlots = buildSlots(s.startTime, s.endTime, s.slotMinutes);
+      const sameLen = nextSlots.length === s.slots.length;
+      const sameLabels = sameLen && nextSlots.every((v, i) => v === s.slots[i]);
+      if (sameLabels) return s;
+      const maxIdx = nextSlots.length;
+      const classes = s.classes.map((cls) => {
+        const grid: Record<string, Cell> = {};
+        Object.entries(cls.grid).forEach(([k, v]) => {
+          const m = k.match(/^(.+)-(\d+)$/);
+          if (!m) return;
+          if (parseInt(m[2], 10) < maxIdx) grid[k] = v;
+        });
+        return { ...cls, grid };
+      });
+      return { ...s, slots: nextSlots, classes };
+    });
+  }, [state.startTime, state.endTime, state.slotMinutes]);
+
   useEffect(() => {
     const up = () => setIsPainting(false);
     window.addEventListener("mouseup", up);
