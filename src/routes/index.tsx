@@ -784,7 +784,7 @@ function Index() {
           let best: { date: string; slot: number; score: number } | null = null;
           for (const [date, starts] of Object.entries(task.startsByDate)) {
             for (const sIdx of starts) {
-              if (!canPlace(task.cls, task.course, date, sIdx)) return;
+              if (!canPlace(task.cls, task.course, date, sIdx)) continue;
               const score =
                 (task.perDay[date] ?? 0) * 1000000 +
                 classDayLoad(task.cls, date) * 10000 +
