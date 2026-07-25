@@ -765,6 +765,22 @@ function Index() {
         let progressed = true;
         while (progressed) {
           progressed = false;
+          // Compute per-class day load once per pass so tasks avoid piling
+          // into days that are already busy for this class (spread across the
+          // week rather than filling Monday-first).
+          const classDayLoad = new Map<string, Record<string, number>>();
+          classes.forEach((cls) => {
+            const load: Record<string, number> = {};
+            weekDates.forEach((d) => {
+              let n = 0;
+              s.slots.forEach((_, i) => {
+                const cell = cls.grid[`${d}-${i}`];
+                if (cell?.kind === "course") n++;
+              });
+              load[d] = n;
+            });
+            classDayLoad.set(cls.id, load);
+          });
           // Sort tasks: most-remaining first, then fewer allowed weekdays (tighter constraint)
           tasks.sort((a, b) => {
             if (b.remaining !== a.remaining) return b.remaining - a.remaining;
@@ -779,10 +795,12 @@ function Index() {
             let best: { date: string; slot: number; score: number } | null = null;
             for (const date of weekDates) {
               const starts = task.startsByDate[date] ?? [];
+              const dayLoad = classDayLoad.get(task.cls.id)?.[date] ?? 0;
               for (const sIdx of starts) {
                 if (!canPlace(task.cls, task.course, date, sIdx)) continue;
                 const score =
-                  (task.perDay[date] ?? 0) * 10000 +
+                  (task.perDay[date] ?? 0) * 1000000 +
+                  dayLoad * 10000 +
                   (task.perSlot[sIdx] ?? 0) * 100 +
                   sIdx;
                 if (!best || score < best.score) best = { date, slot: sIdx, score };
@@ -796,6 +814,8 @@ function Index() {
               task.cls.grid[key] = { kind: "course", courseId: task.course.id };
               (facultyBusy[key] ??= new Set()).add(task.course.faculty);
             }
+            const clsLoad = classDayLoad.get(task.cls.id);
+            if (clsLoad) clsLoad[best.date] = (clsLoad[best.date] ?? 0) + span;
             task.perDay[best.date] = (task.perDay[best.date] ?? 0) + 1;
             task.perSlot[best.slot] = (task.perSlot[best.slot] ?? 0) + 1;
             task.remaining--;
