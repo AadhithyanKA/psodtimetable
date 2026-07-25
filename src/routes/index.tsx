@@ -297,18 +297,36 @@ const countCourseSessionsInDates = (
         slotIdx++;
         continue;
       }
+      let hasFullSpan = true;
+      for (let i = 0; i < span; i++) {
+        const idx = slotIdx + i;
+        const part = grid[`${date}-${idx}`];
+        if (idx >= slots.length || slots[idx]?.isBreak || part?.kind !== "course" || part.courseId !== course.id) {
+          hasFullSpan = false;
+          break;
+        }
+      }
+      if (!hasFullSpan) {
+        slotIdx++;
+        continue;
+      }
       count++;
       onStart?.(date, slotIdx);
-      let covered = 1;
-      while (covered < span && slotIdx + covered < slots.length) {
-        const next = grid[`${date}-${slotIdx + covered}`];
-        if (next?.kind !== "course" || next.courseId !== course.id) break;
-        covered++;
-      }
-      slotIdx += Math.max(1, covered);
+      slotIdx += span;
     }
   });
   return count;
+};
+
+const courseSpanFitsRules = (course: Course, slots: Slot[], date: string, start: number): boolean => {
+  if (!courseAllowedOn(course, date)) return false;
+  const span = cleanDurationSlots(course.durationSlots, slots);
+  for (let i = 0; i < span; i++) {
+    const idx = start + i;
+    if (idx >= slots.length || slots[idx]?.isBreak) return false;
+    if (!courseAllowedSlotOn(course, idx, date)) return false;
+  }
+  return true;
 };
 
 const countCourseRuleCapacity = (course: Course, slots: Slot[], dateList: string[]): number => {
@@ -320,14 +338,17 @@ const countCourseRuleCapacity = (course: Course, slots: Slot[], dateList: string
   return dateList.reduce((sum, date) => {
     if (!courseAllowedOn(course, date)) return sum;
     const starts = effectiveAllowedSlots(course, date) ?? nonBreakStarts;
-    return sum + starts.filter((start) => {
-      if (start < 0 || start >= slots.length || slots[start]?.isBreak) return false;
-      for (let i = 0; i < span; i++) {
-        const idx = start + i;
-        if (idx >= slots.length || slots[idx]?.isBreak) return false;
-      }
-      return true;
-    }).length;
+    const validStarts = starts.filter((start) => {
+      return start >= 0 && start < slots.length && courseSpanFitsRules(course, slots, date, start);
+    }).sort((a, b) => a - b);
+    let count = 0;
+    let nextFreeStart = 0;
+    validStarts.forEach((start) => {
+      if (start < nextFreeStart) return;
+      count++;
+      nextFreeStart = start + span;
+    });
+    return sum + count;
   }, 0);
 };
 
@@ -460,11 +481,33 @@ function Index() {
   }, [state, dates]);
 
   const applyTool = (date: string, slotIdx: number, tool: Tool) => {
-    // Enforce course rules — silently skip disallowed dates
     if (tool.kind === "course") {
       const active = state.classes.find((c) => c.id === activeClassId);
       const course = active?.courses.find((c) => c.id === tool.courseId);
-      if (course && !courseAllowedOn(course, date)) return;
+      if (!active || !course || !courseAllowedOn(course, date)) {
+        setAutoFillReport("Cannot place course — this date is outside its rules.");
+        return;
+      }
+      const span = cleanDurationSlots(course.durationSlots, state.slots);
+      for (let k = 0; k < span; k++) {
+        const idx = slotIdx + k;
+        if (idx >= state.slots.length || state.slots[idx]?.isBreak || !courseAllowedSlotOn(course, idx, date)) {
+          setAutoFillReport("Cannot place course — the full session must fit only inside selected rule periods.");
+          return;
+        }
+        const key = `${date}-${idx}`;
+        const facultyBusy = state.classes.some((cls) => {
+          if (cls.id === activeClassId) return false;
+          const cell = cls.grid[key];
+          if (cell?.kind !== "course") return false;
+          const otherCourse = cls.courses.find((c) => c.id === cell.courseId);
+          return otherCourse?.faculty === course.faculty;
+        });
+        if (facultyBusy) {
+          setAutoFillReport("Cannot place course — this faculty is already assigned in another class at that time.");
+          return;
+        }
+      }
     }
     setState((s) => ({
       ...s,
@@ -475,7 +518,7 @@ function Index() {
         let span = 1;
         if (tool.kind === "course") {
           const course = cls.courses.find((c) => c.id === tool.courseId);
-        span = cleanDurationSlots(course?.durationSlots, s.slots);
+          span = cleanDurationSlots(course?.durationSlots, s.slots);
         }
         for (let k = 0; k < span; k++) {
           const idx = slotIdx + k;
@@ -686,6 +729,75 @@ function Index() {
         });
       }
 
+      const removeInvalidPlacements = (): number => {
+        let removed = 0;
+        const deleteCourseRun = (cls: ClassData, date: string, start: number, courseId: string) => {
+          let idx = start;
+          while (idx < s.slots.length) {
+            const key = `${date}-${idx}`;
+            const cell = cls.grid[key];
+            if (cell?.kind !== "course" || cell.courseId !== courseId) break;
+            delete cls.grid[key];
+            removed++;
+            idx++;
+          }
+        };
+
+        const removeRuleBreakers = () => {
+          classes.forEach((cls) => {
+            workingDates.forEach((date) => {
+              for (let slotIdx = 0; slotIdx < s.slots.length; slotIdx++) {
+                const key = `${date}-${slotIdx}`;
+                const cell = cls.grid[key];
+                if (cell?.kind !== "course") continue;
+                const prev = slotIdx > 0 ? cls.grid[`${date}-${slotIdx - 1}`] : undefined;
+                if (prev?.kind === "course" && prev.courseId === cell.courseId) continue;
+                const course = cls.courses.find((c) => c.id === cell.courseId);
+                const span = course ? cleanDurationSlots(course.durationSlots, s.slots) : 1;
+                const hasFullSpan = Boolean(course) && Array.from({ length: span }, (_, i) => {
+                  const idx = slotIdx + i;
+                  const part = cls.grid[`${date}-${idx}`];
+                  return idx < s.slots.length && !s.slots[idx]?.isBreak && part?.kind === "course" && part.courseId === cell.courseId;
+                }).every(Boolean);
+                if (!course || !hasFullSpan || !courseSpanFitsRules(course, s.slots, date, slotIdx)) {
+                  deleteCourseRun(cls, date, slotIdx, cell.courseId);
+                }
+              }
+            });
+          });
+        };
+
+        removeRuleBreakers();
+        workingDates.forEach((date) => {
+          s.slots.forEach((_, slotIdx) => {
+            const key = `${date}-${slotIdx}`;
+            const byFaculty = new Map<string, ClassData[]>();
+            classes.forEach((cls) => {
+              const cell = cls.grid[key];
+              if (cell?.kind !== "course") return;
+              const course = cls.courses.find((c) => c.id === cell.courseId);
+              if (!course) return;
+              const list = byFaculty.get(course.faculty) ?? [];
+              list.push(cls);
+              byFaculty.set(course.faculty, list);
+            });
+            byFaculty.forEach((busyClasses) => {
+              if (busyClasses.length < 2) return;
+              busyClasses.forEach((cls) => {
+                const cell = cls.grid[key];
+                if (cell?.kind !== "course") return;
+                delete cls.grid[key];
+                removed++;
+              });
+            });
+          });
+        });
+        removeRuleBreakers();
+        return removed;
+      };
+
+      const safetyRemoved = removeInvalidPlacements();
+
       const facultyBusy: Record<string, Set<string>> = {};
       classes.forEach((cls) => {
         Object.entries(cls.grid).forEach(([key, cell]) => {
@@ -694,6 +806,7 @@ function Index() {
           if (course) (facultyBusy[key] ??= new Set()).add(course.faculty);
         });
       });
+      const globalDateOrder = new Map(workingDates.map((date, index) => [date, index]));
 
       const allNonBreakStarts = s.slots
         .map((slot, idx) => ({ slot, idx }))
@@ -714,7 +827,7 @@ function Index() {
           const idx = start + i;
           if (idx >= s.slots.length) return false;
           if (s.slots[idx].isBreak) return false;
-          if (!opts.strictRules && !courseAllowedSlotOn(course, idx, date)) return false;
+          if (!courseAllowedSlotOn(course, idx, date)) return false;
         }
         return true;
       };
@@ -772,9 +885,11 @@ function Index() {
         dateList.forEach((d) => {
           perDay[d] = 0;
         });
-        placed = countCourseSessionsInDates(cls.grid, course, s.slots, dateList, (d, i) => {
+        countCourseSessionsInDates(cls.grid, course, s.slots, dateList, (d, i) => {
+          if (!courseAllowedOn(course, d) || !spanFitsCourse(course, i, d)) return;
           perDay[d] = (perDay[d] ?? 0) + 1;
           perSlot[i] = (perSlot[i] ?? 0) + 1;
+          placed++;
         });
         return { placed, perDay, perSlot };
       };
@@ -874,38 +989,71 @@ function Index() {
           return aRules - bRules;
         });
 
+        let nextPlacement: { task: AutoTask; date: string; slot: number; score: number } | null = null;
         for (const task of tasks) {
           if (task.remaining <= 0) continue;
-          let best: { date: string; slot: number; score: number } | null = null;
           for (const [date, starts] of Object.entries(task.startsByDate)) {
             for (const sIdx of starts) {
               if (!canPlace(task.cls, task.course, date, sIdx)) continue;
-              // Fill the nearest matching opportunity first: earlier date, then earlier period.
-              // Load-balancing is only a tie-breaker now, so rules never skip an open slot
-              // just to spread the timetable later in the range.
+              const taskIndex = tasks.indexOf(task);
+              const span = cleanDurationSlots(task.course.durationSlots, s.slots);
+              const currentAvailability = availability.get(task) ?? 0;
+              const wouldBlockAnotherRequiredSlot = tasks.reduce((risk, other) => {
+                if (other === task || other.remaining <= 0) return risk;
+                const otherAvailability = availability.get(other) ?? 0;
+                if (otherAvailability === 0) return risk;
+                let blockedOptions = 0;
+                Object.entries(other.startsByDate).forEach(([otherDate, otherStarts]) => {
+                  otherStarts.forEach((otherStart) => {
+                    if (!canPlace(other.cls, other.course, otherDate, otherStart)) return;
+                    const otherSpan = cleanDurationSlots(other.course.durationSlots, s.slots);
+                    let overlaps = false;
+                    for (let a = 0; a < span; a++) {
+                      for (let b = 0; b < otherSpan; b++) {
+                        if (date === otherDate && sIdx + a === otherStart + b) overlaps = true;
+                      }
+                    }
+                    if (!overlaps) return;
+                    if (other.cls.id === task.cls.id || other.course.faculty === task.course.faculty) {
+                      blockedOptions++;
+                    }
+                  });
+                });
+                return otherAvailability - blockedOptions < other.remaining ? risk + 1 : risk;
+              }, 0);
+              const avoidableRisk = currentAvailability > task.remaining ? wouldBlockAnotherRequiredSlot : 0;
+              // Global earliest-first selection: choose the nearest valid date/period
+              // across every class/course before considering spread or course priority.
+              // This prevents an open rule slot from being skipped while a later slot is used.
               const score =
-                (task.dateOrder[date] ?? workingDates.length) * 100000000 +
-                sIdx * 100000 +
-                (task.perDay[date] ?? 0) * 1000 +
-                classDayLoad(task.cls, date) * 10 +
-                (task.perSlot[sIdx] ?? 0);
-              if (!best || score < best.score) best = { date, slot: sIdx, score };
+                avoidableRisk * 1000000000000 +
+                (globalDateOrder.get(date) ?? workingDates.length) * 1000000000 +
+                sIdx * 1000000 +
+                (task.dateOrder[date] ?? workingDates.length) * 10000 +
+                taskIndex * 100 +
+                (task.perDay[date] ?? 0) * 10 +
+                (task.perSlot[sIdx] ?? 0) +
+                classDayLoad(task.cls, date);
+              if (!nextPlacement || score < nextPlacement.score) {
+                nextPlacement = { task, date, slot: sIdx, score };
+              }
             }
           }
-          if (!best) continue;
-
-          const span = cleanDurationSlots(task.course.durationSlots, s.slots);
-          for (let i = 0; i < span; i++) {
-            const key = `${best.date}-${best.slot + i}`;
-            task.cls.grid[key] = { kind: "course", courseId: task.course.id };
-            (facultyBusy[key] ??= new Set()).add(task.course.faculty);
-          }
-          task.perDay[best.date] = (task.perDay[best.date] ?? 0) + 1;
-          task.perSlot[best.slot] = (task.perSlot[best.slot] ?? 0) + 1;
-          task.remaining--;
-          placedCount++;
-          progressed = true;
         }
+        if (!nextPlacement) continue;
+
+        const task = nextPlacement.task;
+        const span = cleanDurationSlots(task.course.durationSlots, s.slots);
+        for (let i = 0; i < span; i++) {
+          const key = `${nextPlacement.date}-${nextPlacement.slot + i}`;
+          task.cls.grid[key] = { kind: "course", courseId: task.course.id };
+          (facultyBusy[key] ??= new Set()).add(task.course.faculty);
+        }
+        task.perDay[nextPlacement.date] = (task.perDay[nextPlacement.date] ?? 0) + 1;
+        task.perSlot[nextPlacement.slot] = (task.perSlot[nextPlacement.slot] ?? 0) + 1;
+        task.remaining--;
+        placedCount++;
+        progressed = true;
       }
 
       tasks.forEach((task) => {
@@ -926,6 +1074,36 @@ function Index() {
         unmet.push(
           `${task.cls.name} · ${task.course.name}: ${task.remaining} left${openNow === 0 ? ` (${topReason ?? "no open rule slots"})` : ` (${openNow} open rule slots)`}`,
         );
+      });
+
+      const auditIssues: string[] = [];
+      workingDates.forEach((date) => {
+        s.slots.forEach((_, slotIdx) => {
+          const key = `${date}-${slotIdx}`;
+          const facultyAtSlot = new Map<string, string[]>();
+          classes.forEach((cls) => {
+            const cell = cls.grid[key];
+            if (cell?.kind !== "course") return;
+            const course = cls.courses.find((c) => c.id === cell.courseId);
+            if (!course) {
+              auditIssues.push(`${cls.name} ${date} ${periodLabelFor(slotIdx)} has an unknown course`);
+              return;
+            }
+            const prev = slotIdx > 0 ? cls.grid[`${date}-${slotIdx - 1}`] : undefined;
+            const isStart = !(prev?.kind === "course" && prev.courseId === cell.courseId);
+            if (isStart && !courseSpanFitsRules(course, s.slots, date, slotIdx)) {
+              auditIssues.push(`${cls.name} ${course.name} violates rules at ${date} ${periodLabelFor(slotIdx)}`);
+            }
+            const list = facultyAtSlot.get(course.faculty) ?? [];
+            list.push(`${cls.name} · ${course.name}`);
+            facultyAtSlot.set(course.faculty, list);
+          });
+          facultyAtSlot.forEach((list, faculty) => {
+            if (list.length > 1) {
+              auditIssues.push(`${faculty} overlaps at ${date} ${periodLabelFor(slotIdx)} (${list.join(", ")})`);
+            }
+          });
+        });
       });
 
       const visibleCourseCounts = classes.map((cls) => {
@@ -962,7 +1140,11 @@ function Index() {
           setAutoFillReport(`${mode}: nothing to place${reason ? ` — check ${reason}.` : "."}`);
         } else if (unmet.length > 0) {
           setAutoFillReport(
-            `${mode}: placed ${placedCount} of ${totalTarget}. Remaining: ${unmet.slice(0, 4).join("; ")}`,
+            `${mode}: placed ${placedCount} of ${totalTarget}. ${safetyRemoved > 0 ? `Removed ${safetyRemoved} unsafe old cell${safetyRemoved === 1 ? "" : "s"}. ` : ""}Remaining: ${unmet.slice(0, 4).join("; ")}`,
+          );
+        } else if (auditIssues.length > 0) {
+          setAutoFillReport(
+            `${mode}: safety audit found issues — ${auditIssues.slice(0, 3).join("; ")}`,
           );
         } else if (placedCount === 0) {
           if (firstVisibleClass) {
@@ -971,7 +1153,7 @@ function Index() {
               ? visibleCourseCounts.find((item) => item.id === activeClassId)?.name
               : firstVisibleClass.name;
             setAutoFillReport(
-              `${mode}: already filled — showing ${showingCount} course slot${showingCount === 1 ? "" : "s"}${showingClass ? ` in ${showingClass}` : ""}.`,
+              `${mode}: already filled and rules verified — showing ${showingCount} course slot${showingCount === 1 ? "" : "s"}${showingClass ? ` in ${showingClass}` : ""}.${safetyRemoved > 0 ? ` Removed ${safetyRemoved} unsafe old cell${safetyRemoved === 1 ? "" : "s"}.` : ""}`,
             );
           } else {
             setAutoFillReport(
@@ -979,7 +1161,7 @@ function Index() {
             );
           }
         } else {
-          setAutoFillReport(`${mode}: placed ${placedCount} of ${totalTarget} planned sessions.`);
+          setAutoFillReport(`${mode}: placed ${placedCount} of ${totalTarget} planned sessions. Rules verified.${safetyRemoved > 0 ? ` Removed ${safetyRemoved} unsafe old cell${safetyRemoved === 1 ? "" : "s"}.` : ""}`);
         }
       });
 
