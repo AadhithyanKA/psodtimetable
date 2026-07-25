@@ -39,6 +39,10 @@ type Course = {
   durationSlots: number;
   // Target number of sessions per week (used by auto-fill). 0 = don't auto-fill.
   weeklyPeriods?: number;
+  // Total number of sessions to place across the whole date range.
+  // When set (>0) this overrides the per-week weeklyPeriods target during auto-fill
+  // and drives the planned/remaining counters.
+  totalSessions?: number;
   // 0=Sun..6=Sat. undefined or empty = allowed on all days.
   allowedWeekdays?: number[];
   // Slot indices. undefined or empty = allowed in all periods.
@@ -239,6 +243,10 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
     color: rest.color || COLORS[0],
     durationSlots: cleanDurationSlots(rest.durationSlots, slots),
     weeklyPeriods: Math.max(0, Math.floor(rest.weeklyPeriods ?? 0)),
+    totalSessions:
+      rest.totalSessions === undefined || rest.totalSessions === null
+        ? undefined
+        : Math.max(0, Math.floor(rest.totalSessions)) || undefined,
     allowedWeekdays: (rest.allowedWeekdays ?? []).filter((day) => day >= 0 && day <= 6),
     allowedSlots: rawAllowedSlots.filter((idx) => idx >= 0 && idx < slots.length && !slots[idx].isBreak),
     allowedSlotsByWeekday: allowedByWd,
