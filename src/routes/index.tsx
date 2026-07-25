@@ -41,8 +41,8 @@ type State = {
 };
 
 const COLORS = [
-  "#fca5a5", "#fdba74", "#fcd34d", "#86efac",
-  "#67e8f9", "#93c5fd", "#c4b5fd", "#f9a8d4",
+  "#fdba74", "#fcd34d", "#86efac", "#67e8f9",
+  "#93c5fd", "#c4b5fd", "#f9a8d4", "#a7f3d0",
 ];
 const STORAGE_KEY = "timetable-maker-v2";
 
@@ -79,8 +79,8 @@ function defaultState(): State {
   ];
   const courses: Course[] = [
     { id: "c1", name: "Mathematics", faculty: "Dr. Smith", color: COLORS[0] },
-    { id: "c2", name: "Physics", faculty: "Dr. Jones", color: COLORS[3] },
-    { id: "c3", name: "Chemistry", faculty: "Dr. Patel", color: COLORS[5] },
+    { id: "c2", name: "Physics", faculty: "Dr. Jones", color: COLORS[2] },
+    { id: "c3", name: "Chemistry", faculty: "Dr. Patel", color: COLORS[4] },
   ];
   const mkGrid = (): Record<string, Cell> => ({});
   return {
