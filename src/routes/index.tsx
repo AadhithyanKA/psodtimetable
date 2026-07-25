@@ -297,15 +297,22 @@ const countCourseSessionsInDates = (
         slotIdx++;
         continue;
       }
+      let hasFullSpan = true;
+      for (let i = 0; i < span; i++) {
+        const idx = slotIdx + i;
+        const part = grid[`${date}-${idx}`];
+        if (idx >= slots.length || slots[idx]?.isBreak || part?.kind !== "course" || part.courseId !== course.id) {
+          hasFullSpan = false;
+          break;
+        }
+      }
+      if (!hasFullSpan) {
+        slotIdx++;
+        continue;
+      }
       count++;
       onStart?.(date, slotIdx);
-      let covered = 1;
-      while (covered < span && slotIdx + covered < slots.length) {
-        const next = grid[`${date}-${slotIdx + covered}`];
-        if (next?.kind !== "course" || next.courseId !== course.id) break;
-        covered++;
-      }
-      slotIdx += Math.max(1, covered);
+      slotIdx += span;
     }
   });
   return count;
@@ -325,6 +332,7 @@ const countCourseRuleCapacity = (course: Course, slots: Slot[], dateList: string
       for (let i = 0; i < span; i++) {
         const idx = start + i;
         if (idx >= slots.length || slots[idx]?.isBreak) return false;
+        if (!courseAllowedSlotOn(course, idx, date)) return false;
       }
       return true;
     }).length;
@@ -460,11 +468,33 @@ function Index() {
   }, [state, dates]);
 
   const applyTool = (date: string, slotIdx: number, tool: Tool) => {
-    // Enforce course rules — silently skip disallowed dates
     if (tool.kind === "course") {
       const active = state.classes.find((c) => c.id === activeClassId);
       const course = active?.courses.find((c) => c.id === tool.courseId);
-      if (course && !courseAllowedOn(course, date)) return;
+      if (!active || !course || !courseAllowedOn(course, date)) {
+        setAutoFillReport("Cannot place course — this date is outside its rules.");
+        return;
+      }
+      const span = cleanDurationSlots(course.durationSlots, state.slots);
+      for (let k = 0; k < span; k++) {
+        const idx = slotIdx + k;
+        if (idx >= state.slots.length || state.slots[idx]?.isBreak || !courseAllowedSlotOn(course, idx, date)) {
+          setAutoFillReport("Cannot place course — the full session must fit only inside selected rule periods.");
+          return;
+        }
+        const key = `${date}-${idx}`;
+        const facultyBusy = state.classes.some((cls) => {
+          if (cls.id === activeClassId) return false;
+          const cell = cls.grid[key];
+          if (cell?.kind !== "course") return false;
+          const otherCourse = cls.courses.find((c) => c.id === cell.courseId);
+          return otherCourse?.faculty === course.faculty;
+        });
+        if (facultyBusy) {
+          setAutoFillReport("Cannot place course — this faculty is already assigned in another class at that time.");
+          return;
+        }
+      }
     }
     setState((s) => ({
       ...s,
@@ -475,7 +505,7 @@ function Index() {
         let span = 1;
         if (tool.kind === "course") {
           const course = cls.courses.find((c) => c.id === tool.courseId);
-        span = cleanDurationSlots(course?.durationSlots, s.slots);
+          span = cleanDurationSlots(course?.durationSlots, s.slots);
         }
         for (let k = 0; k < span; k++) {
           const idx = slotIdx + k;
