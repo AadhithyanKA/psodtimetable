@@ -57,32 +57,44 @@ const COLORS = [
   "#93c5fd", "#c4b5fd", "#f9a8d4", "#a7f3d0",
 ];
 const STORAGE_KEY = "timetable-maker-v5";
+const INITIAL_FROM_DATE = "2026-07-25";
 
 const isoToday = () => new Date().toISOString().slice(0, 10);
+const parseIsoParts = (iso: string): [number, number, number] | null => {
+  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)];
+};
+const utcDateFromIso = (iso: string) => {
+  const parts = parseIsoParts(iso);
+  if (!parts) return null;
+  return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+};
 const addDays = (iso: string, n: number) => {
-  const d = new Date(iso + "T00:00:00");
-  d.setDate(d.getDate() + n);
+  const d = utcDateFromIso(iso) ?? new Date(Date.UTC(2026, 6, 25));
+  d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 };
 const daysBetween = (from: string, to: string): string[] => {
   const out: string[] = [];
   if (!from || !to) return out;
-  const start = new Date(from + "T00:00:00");
-  const end = new Date(to + "T00:00:00");
+  const start = utcDateFromIso(from);
+  const end = utcDateFromIso(to);
+  if (!start || !end) return out;
   if (end < start) return out;
   const diff = Math.round((end.getTime() - start.getTime()) / 86400000);
   for (let i = 0; i <= diff; i++) out.push(addDays(from, i));
   return out;
 };
 const dayLabel = (iso: string) => {
-  const d = new Date(iso + "T00:00:00");
+  const d = utcDateFromIso(iso) ?? new Date(Date.UTC(2026, 6, 25));
   return {
-    weekday: d.toLocaleDateString(undefined, { weekday: "short" }),
-    date: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+    weekday: d.toLocaleDateString(undefined, { weekday: "short", timeZone: "UTC" }),
+    date: d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }),
   };
 };
 const weekdayOf = (iso: string): number =>
-  new Date(iso + "T00:00:00").getDay();
+  utcDateFromIso(iso)?.getUTCDay() ?? 0;
 const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
 const WEEKDAY_FULL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const courseAllowedOn = (course: Course, iso: string): boolean => {
@@ -125,8 +137,7 @@ const DEFAULT_SLOTS: Slot[] = [
   { start: "15:25", end: "16:15" },
 ];
 
-function defaultState(): State {
-  const from = isoToday();
+function defaultState(from = isoToday()): State {
   const to = addDays(from, 4);
   const seedCourses: Course[] = [
     { id: "c1", name: "Mathematics", faculty: "Dr. Smith", color: COLORS[0], durationSlots: 1, weeklyPeriods: 4 },
@@ -153,7 +164,7 @@ type Tool =
   | { kind: "erase" };
 
 function Index() {
-  const [state, setState] = useState<State>(defaultState);
+  const [state, setState] = useState<State>(() => defaultState(INITIAL_FROM_DATE));
   const [activeClassId, setActiveClassId] = useState("k1");
   const [hydrated, setHydrated] = useState(false);
   const [picker, setPicker] = useState<{ date: string; slotIdx: number } | null>(null);
@@ -181,13 +192,25 @@ function Index() {
         const parsed = JSON.parse(raw) as Partial<State>;
         const base = defaultState();
         // Migrate v4 → v5: top-level `courses` moved into each class
-        const legacyCourses: Course[] | undefined = (parsed as { courses?: Course[] }).courses;
+        const normalizeCourse = (course: Course & { allowedPeriods?: number[] }): Course => {
+          const { allowedPeriods, ...rest } = course;
+          return {
+            ...rest,
+            allowedSlots: rest.allowedSlots ?? allowedPeriods ?? [],
+            durationSlots: Math.max(1, rest.durationSlots ?? 1),
+            weeklyPeriods: Math.max(0, rest.weeklyPeriods ?? 0),
+          };
+        };
+        const legacyCourses: Course[] | undefined = (parsed as { courses?: Course[] }).courses?.map(normalizeCourse);
         const migratedClasses: ClassData[] = (parsed.classes ?? base.classes).map(
           (cls) => ({
             ...cls,
             courses:
-              (cls as ClassData).courses ??
-              (legacyCourses ? legacyCourses.map((c) => ({ ...c })) : []),
+              (cls as ClassData).courses && (cls as ClassData).courses.length > 0
+                ? (cls as ClassData).courses.map(normalizeCourse)
+                : legacyCourses
+                  ? legacyCourses.map((c) => ({ ...c }))
+                  : [],
           }),
         );
         const merged: State = {
@@ -198,6 +221,8 @@ function Index() {
         };
         setState(merged);
         setActiveClassId(merged.classes[0]?.id ?? "");
+      } else {
+        setState(defaultState());
       }
     } catch {}
   }, []);
@@ -326,7 +351,7 @@ function Index() {
       const wdSet = new Set(weekdays);
       const sSet = new Set(slotIdxs);
       const targetDates = daysBetween(s.fromDate, s.toDate).filter((iso) =>
-        wdSet.has(new Date(iso + "T00:00:00").getDay()),
+        wdSet.has(weekdayOf(iso)),
       );
       return {
         ...s,
@@ -461,7 +486,8 @@ function Index() {
   const autoPopulate = (opts: { overwrite: boolean; strictRules?: boolean }) => {
     // ISO year+week key for grouping
     const weekKey = (iso: string) => {
-      const d = new Date(iso + "T00:00:00");
+      const d = utcDateFromIso(iso);
+      if (!d) return "invalid";
       const day = (d.getUTCDay() + 6) % 7; // Mon=0
       const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day + 3));
       const first = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
@@ -635,12 +661,18 @@ function Index() {
       queueMicrotask(() => {
         const mode = opts.strictRules ? "Fill by Rules" : opts.overwrite ? "Regenerate" : "Fill Empty";
         if (totalTarget === 0) {
-          setAutoFillReport(
-            `${mode}: no eligible sessions found. Check the date range, courses, and non-break periods.`,
-          );
+          const validDates = workingDates.length;
+          const courseCount = classes.reduce((sum, cls) => sum + cls.courses.length, 0);
+          const nonBreakCount = s.slots.filter((slot) => !slot.isBreak).length;
+          const reason = [
+            validDates === 0 ? "date range" : "",
+            courseCount === 0 ? "courses" : "",
+            nonBreakCount === 0 ? "non-break periods" : "",
+          ].filter(Boolean).join(", ");
+          setAutoFillReport(`${mode}: nothing to place${reason ? ` — check ${reason}.` : "."}`);
         } else if (placedCount === 0) {
           setAutoFillReport(
-            `${mode}: 0 of ${totalTarget} placed. Use Regen Rules if cells are already filled or blocked.`,
+            `${mode}: timetable already has ${totalTarget} matching session${totalTarget === 1 ? "" : "s"}, or the remaining rule slots are blocked.`,
           );
         } else if (unmet.length > 0) {
           setAutoFillReport(
