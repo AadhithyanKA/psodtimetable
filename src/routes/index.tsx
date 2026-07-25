@@ -383,11 +383,12 @@ function Index() {
   // Export
   const buildSheet = (cls: ClassData) => {
     const rows: string[][] = [];
-    rows.push(["Day / Date", ...state.slots]);
+    rows.push(["Day / Date", ...state.slots.map(slotLabel)]);
     dates.forEach((date) => {
       const { weekday, date: dstr } = dayLabel(date);
       const row = [`${weekday} ${dstr}`];
-      state.slots.forEach((_, i) => {
+      state.slots.forEach((sl, i) => {
+        if (sl.isBreak) { row.push("Break"); return; }
         const cell = cls.grid[`${date}-${i}`];
         if (!cell) row.push("");
         else if (cell.kind === "break") row.push(`Break: ${cell.label}`);
