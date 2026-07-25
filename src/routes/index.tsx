@@ -769,6 +769,38 @@ function Index() {
       URL.revokeObjectURL(url);
     });
   };
+  const exportASC = () => {
+    const pad = (s: string, n: number) => {
+      const t = s.length > n ? s.slice(0, n - 1) + "…" : s;
+      return t + " ".repeat(Math.max(0, n - t.length));
+    };
+    const parts: string[] = [];
+    parts.push(`Timetable  ${state.fromDate}  to  ${state.toDate}`);
+    parts.push("=".repeat(72));
+    state.classes.forEach((cls) => {
+      const rows = buildSheet(cls);
+      const colWidths = rows[0].map((_, ci) =>
+        Math.min(22, Math.max(...rows.map((r) => String(r[ci] ?? "").length))),
+      );
+      const sep = "+" + colWidths.map((w) => "-".repeat(w + 2)).join("+") + "+";
+      const fmt = (r: string[]) =>
+        "| " + r.map((v, ci) => pad(String(v ?? ""), colWidths[ci])).join(" | ") + " |";
+      parts.push("");
+      parts.push(`Class: ${cls.name}`);
+      parts.push(sep);
+      parts.push(fmt(rows[0]));
+      parts.push(sep);
+      rows.slice(1).forEach((r) => parts.push(fmt(r)));
+      parts.push(sep);
+    });
+    const blob = new Blob([parts.join("\n")], { type: "text/plain;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `timetable_${state.fromDate}_to_${state.toDate}.asc`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   // Save / Load .aadhi file (full app state snapshot)
   const saveAadhi = () => {
