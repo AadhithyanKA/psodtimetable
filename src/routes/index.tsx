@@ -2137,6 +2137,111 @@ function Index() {
                     slots are excluded.
                   </p>
                 </div>
+
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                      Per-weekday periods
+                    </span>
+                    <button
+                      onClick={() =>
+                        updateCourse(course.id, { allowedSlotsByWeekday: undefined })
+                      }
+                      className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                    >
+                      Reset all
+                    </button>
+                  </div>
+                  <p className="mb-2 text-[10px] text-[#2d2d2d]/50">
+                    Optional. Override the default periods above for specific
+                    weekdays (e.g. Mon P1–P2, Thu P5–P6). Unset weekdays fall
+                    back to the default.
+                  </p>
+                  <div className="space-y-1.5">
+                    {WEEKDAY_LABELS.map((_lbl, wd) => {
+                      if (!wdAll && !wdRule.includes(wd)) return null;
+                      const byWd = course.allowedSlotsByWeekday ?? {};
+                      const override = byWd[wd];
+                      const isCustom = override !== undefined;
+                      const activeSet = isCustom
+                        ? new Set(override)
+                        : new Set(slotAll ? nonBreakIdxs.map((x) => x.i) : slotRule);
+                      return (
+                        <div
+                          key={wd}
+                          className="border border-[#0d0d0d]/15 bg-white px-2 py-1.5"
+                        >
+                          <div className="mb-1 flex items-center justify-between">
+                            <span
+                              className="text-[10px] font-bold uppercase tracking-wider"
+                              style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                            >
+                              {WEEKDAY_FULL[wd]}
+                              {!isCustom && (
+                                <span className="ml-1 text-[9px] font-normal text-[#2d2d2d]/40">
+                                  · default
+                                </span>
+                              )}
+                            </span>
+                            {isCustom && (
+                              <button
+                                onClick={() => {
+                                  const next = { ...byWd };
+                                  delete next[wd];
+                                  updateCourse(course.id, {
+                                    allowedSlotsByWeekday:
+                                      Object.keys(next).length > 0 ? next : undefined,
+                                  });
+                                }}
+                                className="text-[9px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                              >
+                                Reset
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {nonBreakIdxs.map(({ i }) => {
+                              const periodNum = state.slots
+                                .slice(0, i + 1)
+                                .filter((x) => !x.isBreak).length;
+                              const on = activeSet.has(i);
+                              return (
+                                <button
+                                  key={i}
+                                  onClick={() => {
+                                    const baseArr = isCustom
+                                      ? [...override!]
+                                      : slotAll
+                                        ? nonBreakIdxs.map((x) => x.i)
+                                        : [...slotRule];
+                                    const nextArr = baseArr.includes(i)
+                                      ? baseArr.filter((x) => x !== i)
+                                      : [...baseArr, i].sort((a, b) => a - b);
+                                    const nextByWd = { ...byWd, [wd]: nextArr };
+                                    updateCourse(course.id, {
+                                      allowedSlotsByWeekday: nextByWd,
+                                    });
+                                  }}
+                                  className={
+                                    "min-w-[2.25rem] border px-1.5 py-0.5 text-[10px] font-bold " +
+                                    (on
+                                      ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
+                                      : isCustom
+                                        ? "border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/40 hover:border-[#0d0d0d]/50"
+                                        : "border-dashed border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/30 hover:border-[#0d0d0d]/40")
+                                  }
+                                  style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                                >
+                                  P{periodNum}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
               <div className="flex justify-end border-t-2 border-[#0d0d0d] bg-[#e8e4dd] px-4 py-2">
                 <button
