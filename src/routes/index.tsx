@@ -122,6 +122,28 @@ const courseAllowedSlot = (course: Course, slotIdx: number): boolean => {
   if (!rule || rule.length === 0) return true;
   return rule.includes(slotIdx);
 };
+// Weekday-aware slot check. Per-weekday override wins over allowedSlots.
+const courseAllowedSlotOn = (
+  course: Course,
+  slotIdx: number,
+  iso: string,
+): boolean => {
+  const perDay = course.allowedSlotsByWeekday?.[weekdayOf(iso)];
+  if (perDay !== undefined) return perDay.includes(slotIdx);
+  return courseAllowedSlot(course, slotIdx);
+};
+// Effective allowed slot indices for a course on a given date (weekday-aware).
+// Returns null when "all periods" are allowed (no restriction).
+const effectiveAllowedSlots = (
+  course: Course,
+  iso: string,
+): number[] | null => {
+  const perDay = course.allowedSlotsByWeekday?.[weekdayOf(iso)];
+  if (perDay !== undefined) return [...perDay].sort((a, b) => a - b);
+  const base = course.allowedSlots;
+  if (!base || base.length === 0) return null;
+  return [...base].sort((a, b) => a - b);
+};
 
 const parseHM = (s: string): number => {
   const [h, m] = s.split(":").map((x) => parseInt(x, 10));
