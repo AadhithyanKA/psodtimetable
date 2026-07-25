@@ -32,13 +32,11 @@ type Cell =
 
 type Course = { id: string; name: string; faculty: string; color: string; durationSlots: number };
 type ClassData = { id: string; name: string; grid: Record<string, Cell> };
+type Slot = { start: string; end: string; isBreak?: boolean }; // 24h "HH:MM"
 type State = {
   fromDate: string; // YYYY-MM-DD
   toDate: string;
-  slots: string[]; // column labels
-  startTime: string; // "HH:MM" 24h
-  endTime: string; // "HH:MM" 24h
-  slotMinutes: number; // duration of one slot
+  slots: Slot[];
   courses: Course[];
   classes: ClassData[];
 };
@@ -47,7 +45,7 @@ const COLORS = [
   "#fdba74", "#fcd34d", "#86efac", "#67e8f9",
   "#93c5fd", "#c4b5fd", "#f9a8d4", "#a7f3d0",
 ];
-const STORAGE_KEY = "timetable-maker-v2";
+const STORAGE_KEY = "timetable-maker-v3";
 
 const isoToday = () => new Date().toISOString().slice(0, 10);
 const addDays = (iso: string, n: number) => {
@@ -86,24 +84,25 @@ const to12h = (mins: number): string => {
   const h = ((h24 + 11) % 12) + 1;
   return `${h}:${String(m).padStart(2, "0")} ${period}`;
 };
-const buildSlots = (start: string, end: string, dur: number): string[] => {
-  const s = parseHM(start);
-  const e = parseHM(end);
-  if (!(dur > 0) || e <= s) return [];
-  const out: string[] = [];
-  for (let t = s; t + dur <= e; t += dur) {
-    out.push(`${to12h(t)} – ${to12h(t + dur)}`);
-  }
-  return out;
-};
+const slotLabel = (s: Slot) => `${to12h(parseHM(s.start))} – ${to12h(parseHM(s.end))}`;
+const slotMinutes = (s: Slot) => Math.max(0, parseHM(s.end) - parseHM(s.start));
+
+const DEFAULT_SLOTS: Slot[] = [
+  { start: "08:50", end: "09:45" },
+  { start: "09:45", end: "10:40" },
+  { start: "10:40", end: "10:50", isBreak: true },
+  { start: "10:50", end: "11:45" },
+  { start: "11:45", end: "12:35" },
+  { start: "12:35", end: "13:25" },
+  { start: "13:25", end: "14:20" },
+  { start: "14:20", end: "14:30", isBreak: true },
+  { start: "14:30", end: "15:25" },
+  { start: "15:25", end: "16:15" },
+];
 
 function defaultState(): State {
   const from = isoToday();
   const to = addDays(from, 4);
-  const startTime = "09:00";
-  const endTime = "17:00";
-  const slotMinutes = 60;
-  const slots = buildSlots(startTime, endTime, slotMinutes);
   const courses: Course[] = [
     { id: "c1", name: "Mathematics", faculty: "Dr. Smith", color: COLORS[0], durationSlots: 1 },
     { id: "c2", name: "Physics", faculty: "Dr. Jones", color: COLORS[2], durationSlots: 1 },
@@ -113,10 +112,7 @@ function defaultState(): State {
   return {
     fromDate: from,
     toDate: to,
-    startTime,
-    endTime,
-    slotMinutes,
-    slots,
+    slots: DEFAULT_SLOTS,
     courses,
     classes: [
       { id: "k1", name: "Class A", grid: mkGrid() },
