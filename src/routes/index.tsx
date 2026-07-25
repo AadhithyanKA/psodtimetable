@@ -287,10 +287,10 @@ function Index() {
         if (!cell) row.push("");
         else if (cell.kind === "break") row.push(`Break: ${cell.label}`);
         else if (cell.kind === "blocked") row.push(`Blocked: ${cell.label}`);
-        else {
+        else if (cell.kind === "course") {
           const c = state.courses.find((x) => x.id === cell.courseId);
           row.push(c ? `${c.name} (${c.faculty})` : "");
-        }
+        } else row.push("");
       });
       rows.push(row);
     });
