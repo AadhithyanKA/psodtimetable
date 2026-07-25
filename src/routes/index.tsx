@@ -318,6 +318,17 @@ const countCourseSessionsInDates = (
   return count;
 };
 
+const courseSpanFitsRules = (course: Course, slots: Slot[], date: string, start: number): boolean => {
+  if (!courseAllowedOn(course, date)) return false;
+  const span = cleanDurationSlots(course.durationSlots, slots);
+  for (let i = 0; i < span; i++) {
+    const idx = start + i;
+    if (idx >= slots.length || slots[idx]?.isBreak) return false;
+    if (!courseAllowedSlotOn(course, idx, date)) return false;
+  }
+  return true;
+};
+
 const countCourseRuleCapacity = (course: Course, slots: Slot[], dateList: string[]): number => {
   const nonBreakStarts = slots
     .map((slot, idx) => ({ slot, idx }))
@@ -328,13 +339,7 @@ const countCourseRuleCapacity = (course: Course, slots: Slot[], dateList: string
     if (!courseAllowedOn(course, date)) return sum;
     const starts = effectiveAllowedSlots(course, date) ?? nonBreakStarts;
     const validStarts = starts.filter((start) => {
-      if (start < 0 || start >= slots.length || slots[start]?.isBreak) return false;
-      for (let i = 0; i < span; i++) {
-        const idx = start + i;
-        if (idx >= slots.length || slots[idx]?.isBreak) return false;
-        if (!courseAllowedSlotOn(course, idx, date)) return false;
-      }
-      return true;
+      return start >= 0 && start < slots.length && courseSpanFitsRules(course, slots, date, start);
     }).sort((a, b) => a - b);
     let count = 0;
     let nextFreeStart = 0;
