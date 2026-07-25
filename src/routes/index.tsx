@@ -39,6 +39,10 @@ type Course = {
   durationSlots: number;
   // Target number of sessions per week (used by auto-fill). 0 = don't auto-fill.
   weeklyPeriods?: number;
+  // Total number of sessions to place across the whole date range.
+  // When set (>0) this overrides the per-week weeklyPeriods target during auto-fill
+  // and drives the planned/remaining counters.
+  totalSessions?: number;
   // 0=Sun..6=Sat. undefined or empty = allowed on all days.
   allowedWeekdays?: number[];
   // Slot indices. undefined or empty = allowed in all periods.
@@ -239,6 +243,10 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
     color: rest.color || COLORS[0],
     durationSlots: cleanDurationSlots(rest.durationSlots, slots),
     weeklyPeriods: Math.max(0, Math.floor(rest.weeklyPeriods ?? 0)),
+    totalSessions:
+      rest.totalSessions === undefined || rest.totalSessions === null
+        ? undefined
+        : Math.max(0, Math.floor(rest.totalSessions)) || undefined,
     allowedWeekdays: (rest.allowedWeekdays ?? []).filter((day) => day >= 0 && day <= 6),
     allowedSlots: rawAllowedSlots.filter((idx) => idx >= 0 && idx < slots.length && !slots[idx].isBreak),
     allowedSlotsByWeekday: allowedByWd,
@@ -679,6 +687,27 @@ function Index() {
         else weeks.set(k, [d]);
       });
 
+      // Per-course global budget: when a course has an explicit totalSessions
+      // target, cap placements across all weeks by (totalSessions - already placed
+      // within workingDates). Key = `${classId}::${courseId}`.
+      const totalBudget: Record<string, number> = {};
+      classes.forEach((cls) => {
+        cls.courses.forEach((course) => {
+          if (!course.totalSessions || course.totalSessions <= 0) return;
+          let already = 0;
+          workingDates.forEach((d) => {
+            s.slots.forEach((_, i) => {
+              const cell = cls.grid[`${d}-${i}`];
+              if (cell?.kind === "course" && cell.courseId === course.id) {
+                const prev = cls.grid[`${d}-${i - 1}`];
+                if (!prev || prev.kind !== "course" || prev.courseId !== course.id) already++;
+              }
+            });
+          });
+          totalBudget[`${cls.id}::${course.id}`] = Math.max(0, course.totalSessions - already);
+        });
+      });
+
       // Round-robin across (class, course) to spread placements fairly
       weeks.forEach((weekDates) => {
         type Task = { cls: ClassData; course: Course; remaining: number; perDay: Record<string, number>; perSlot: Record<number, number>; startsByDate: Record<string, number[]> };
@@ -700,6 +729,12 @@ function Index() {
               // If /wk is 0 or missing, use every allowed weekday × allowed-period opportunity.
               // This keeps added courses eligible even when the weekly target field is untouched.
               target = target > 0 ? Math.min(target, cap) : cap;
+            }
+            const budgetKey = `${cls.id}::${course.id}`;
+            if (course.totalSessions && course.totalSessions > 0) {
+              // Total-sessions mode: budget across all weeks.
+              const remainingBudget = totalBudget[budgetKey] ?? 0;
+              target = Math.min(cap, remainingBudget);
             }
             if (target <= 0) return;
             totalTarget += target;
@@ -764,6 +799,10 @@ function Index() {
             task.perDay[best.date] = (task.perDay[best.date] ?? 0) + 1;
             task.perSlot[best.slot] = (task.perSlot[best.slot] ?? 0) + 1;
             task.remaining--;
+            const bKey = `${task.cls.id}::${task.course.id}`;
+            if (bKey in totalBudget) {
+              totalBudget[bKey] = Math.max(0, (totalBudget[bKey] ?? 0) - 1);
+            }
             placedCount++;
             progressed = true;
           }
@@ -1157,7 +1196,10 @@ function Index() {
       return n;
     };
     const planFor = (cls: ClassData) =>
-      cls.courses.reduce((sum, c) => sum + Math.max(0, c.weeklyPeriods ?? 0), 0) * weekCount;
+      cls.courses.reduce((sum, c) => {
+        if (c.totalSessions && c.totalSessions > 0) return sum + c.totalSessions;
+        return sum + Math.max(0, c.weeklyPeriods ?? 0) * weekCount;
+      }, 0);
     const activePlanned = activeClass ? planFor(activeClass) : 0;
     const activePlaced = activeClass ? countPlaced(activeClass) : 0;
     const totalPlanned = state.classes.reduce((s, c) => s + planFor(c), 0);
@@ -1325,6 +1367,23 @@ function Index() {
                           className="w-10 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
                         />
                         <span>/wk</span>
+                      </label>
+                      <label
+                        title="Total sessions across the whole date range. Overrides /wk when set."
+                        className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
+                        style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                      >
+                        <input
+                          type="number"
+                          min={0}
+                          value={c.totalSessions ?? 0}
+                          onChange={(e) => {
+                            const n = Math.max(0, parseInt(e.target.value || "0", 10));
+                            updateCourse(c.id, { totalSessions: n > 0 ? n : undefined });
+                          }}
+                          className="w-12 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
+                        />
+                        <span>total</span>
                       </label>
                     </div>
                     <div className="grid grid-cols-2 gap-2 px-3 pb-2">
@@ -2033,6 +2092,20 @@ function Index() {
                   const allowed =
                     courseAllowedOn(c, picker.date) &&
                     courseAllowedSlotOn(c, picker.slotIdx, picker.date);
+                  // Count placed sessions of this course in the current date range
+                  let placedForCourse = 0;
+                  if (activeClass) {
+                    dates.forEach((d) => {
+                      state.slots.forEach((_, i) => {
+                        const cell = activeClass.grid[`${d}-${i}`];
+                        if (cell?.kind === "course" && cell.courseId === c.id) {
+                          const prev = activeClass.grid[`${d}-${i - 1}`];
+                          if (!prev || prev.kind !== "course" || prev.courseId !== c.id)
+                            placedForCourse++;
+                        }
+                      });
+                    });
+                  }
                   const dateRange = c.fromDate || c.toDate ? `${c.fromDate ?? "start"} → ${c.toDate ?? "end"}` : null;
                   const ruleLabel =
                     dateRange ||
@@ -2073,6 +2146,14 @@ function Index() {
                         <span className="block truncate text-[11px] text-[#2d2d2d]/60">
                           {c.faculty}
                           {ruleLabel && ` · ${ruleLabel} only`}
+                        </span>
+                        <span
+                          className="mt-0.5 block text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/70"
+                          style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                        >
+                          {c.totalSessions && c.totalSessions > 0
+                            ? `${placedForCourse} / ${c.totalSessions} sessions`
+                            : `${placedForCourse} placed · no total set`}
                         </span>
                       </span>
                       {!allowed && (
