@@ -1076,6 +1076,36 @@ function Index() {
         );
       });
 
+      const auditIssues: string[] = [];
+      workingDates.forEach((date) => {
+        s.slots.forEach((_, slotIdx) => {
+          const key = `${date}-${slotIdx}`;
+          const facultyAtSlot = new Map<string, string[]>();
+          classes.forEach((cls) => {
+            const cell = cls.grid[key];
+            if (cell?.kind !== "course") return;
+            const course = cls.courses.find((c) => c.id === cell.courseId);
+            if (!course) {
+              auditIssues.push(`${cls.name} ${date} ${periodLabelFor(slotIdx)} has an unknown course`);
+              return;
+            }
+            const prev = slotIdx > 0 ? cls.grid[`${date}-${slotIdx - 1}`] : undefined;
+            const isStart = !(prev?.kind === "course" && prev.courseId === cell.courseId);
+            if (isStart && !courseSpanFitsRules(course, s.slots, date, slotIdx)) {
+              auditIssues.push(`${cls.name} ${course.name} violates rules at ${date} ${periodLabelFor(slotIdx)}`);
+            }
+            const list = facultyAtSlot.get(course.faculty) ?? [];
+            list.push(`${cls.name} · ${course.name}`);
+            facultyAtSlot.set(course.faculty, list);
+          });
+          facultyAtSlot.forEach((list, faculty) => {
+            if (list.length > 1) {
+              auditIssues.push(`${faculty} overlaps at ${date} ${periodLabelFor(slotIdx)} (${list.join(", ")})`);
+            }
+          });
+        });
+      });
+
       const visibleCourseCounts = classes.map((cls) => {
         const count = workingDates.reduce((sum, date) => {
           return sum + s.slots.reduce((slotSum, _, slotIdx) => {
@@ -1110,7 +1140,11 @@ function Index() {
           setAutoFillReport(`${mode}: nothing to place${reason ? ` — check ${reason}.` : "."}`);
         } else if (unmet.length > 0) {
           setAutoFillReport(
-            `${mode}: placed ${placedCount} of ${totalTarget}. Remaining: ${unmet.slice(0, 4).join("; ")}`,
+            `${mode}: placed ${placedCount} of ${totalTarget}. ${safetyRemoved > 0 ? `Removed ${safetyRemoved} unsafe old cell${safetyRemoved === 1 ? "" : "s"}. ` : ""}Remaining: ${unmet.slice(0, 4).join("; ")}`,
+          );
+        } else if (auditIssues.length > 0) {
+          setAutoFillReport(
+            `${mode}: safety audit found issues — ${auditIssues.slice(0, 3).join("; ")}`,
           );
         } else if (placedCount === 0) {
           if (firstVisibleClass) {
@@ -1119,7 +1153,7 @@ function Index() {
               ? visibleCourseCounts.find((item) => item.id === activeClassId)?.name
               : firstVisibleClass.name;
             setAutoFillReport(
-              `${mode}: already filled — showing ${showingCount} course slot${showingCount === 1 ? "" : "s"}${showingClass ? ` in ${showingClass}` : ""}.`,
+              `${mode}: already filled and rules verified — showing ${showingCount} course slot${showingCount === 1 ? "" : "s"}${showingClass ? ` in ${showingClass}` : ""}.${safetyRemoved > 0 ? ` Removed ${safetyRemoved} unsafe old cell${safetyRemoved === 1 ? "" : "s"}.` : ""}`,
             );
           } else {
             setAutoFillReport(
@@ -1127,7 +1161,7 @@ function Index() {
             );
           }
         } else {
-          setAutoFillReport(`${mode}: placed ${placedCount} of ${totalTarget} planned sessions.`);
+          setAutoFillReport(`${mode}: placed ${placedCount} of ${totalTarget} planned sessions. Rules verified.${safetyRemoved > 0 ? ` Removed ${safetyRemoved} unsafe old cell${safetyRemoved === 1 ? "" : "s"}.` : ""}`);
         }
       });
 
