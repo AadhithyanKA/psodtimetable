@@ -1265,6 +1265,9 @@ function Index() {
                         {c.allowedSlots && c.allowedSlots.length > 0
                           ? c.allowedSlots.map((i) => `P${periodNumberFor(i)}`).join(" ")
                           : "All periods"}
+                        {c.allowedSlotsByWeekday && Object.keys(c.allowedSlotsByWeekday).length > 0
+                          ? " · per-day"
+                          : ""}
                       </span>
                     </button>
                   </div>
