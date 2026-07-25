@@ -86,11 +86,13 @@ const daysBetween = (from: string, to: string): string[] => {
   for (let i = 0; i <= diff; i++) out.push(addDays(from, i));
   return out;
 };
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const dayLabel = (iso: string) => {
   const d = utcDateFromIso(iso) ?? new Date(Date.UTC(2026, 6, 25));
   return {
-    weekday: d.toLocaleDateString(undefined, { weekday: "short", timeZone: "UTC" }),
-    date: d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }),
+    weekday: WEEKDAY_SHORT[d.getUTCDay()] ?? "Sun",
+    date: `${d.getUTCDate()} ${MONTH_SHORT[d.getUTCMonth()] ?? "Jan"}`,
   };
 };
 const weekdayOf = (iso: string): number =>
@@ -157,6 +159,61 @@ function defaultState(from = isoToday()): State {
   };
 }
 
+type LegacyCourse = Course & { allowedPeriods?: number[] };
+type SavedClassData = Partial<ClassData> & { courses?: LegacyCourse[] };
+type SavedState = Partial<Omit<State, "classes">> & {
+  classes?: SavedClassData[];
+  courses?: LegacyCourse[];
+};
+
+const nonBreakCount = (slots: Slot[]) => slots.filter((slot) => !slot.isBreak).length;
+const cleanDurationSlots = (value: unknown, slots: Slot[]): number => {
+  const parsed = typeof value === "number" ? value : parseInt(String(value ?? "1"), 10);
+  const whole = Number.isFinite(parsed) ? Math.floor(parsed) : 1;
+  const max = Math.max(1, nonBreakCount(slots));
+  return whole >= 1 && whole <= max ? whole : 1;
+};
+const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
+  const { allowedPeriods, ...rest } = course;
+  const rawAllowedSlots = rest.allowedSlots ?? allowedPeriods ?? [];
+  return {
+    ...rest,
+    id: rest.id || `c${Date.now()}`,
+    name: rest.name || "New Course",
+    faculty: rest.faculty || "Faculty",
+    color: rest.color || COLORS[0],
+    durationSlots: cleanDurationSlots(rest.durationSlots, slots),
+    weeklyPeriods: Math.max(0, Math.floor(rest.weeklyPeriods ?? 0)),
+    allowedWeekdays: (rest.allowedWeekdays ?? []).filter((day) => day >= 0 && day <= 6),
+    allowedSlots: rawAllowedSlots.filter((idx) => idx >= 0 && idx < slots.length && !slots[idx].isBreak),
+  };
+};
+const normalizeStateSnapshot = (snapshot: SavedState): State => {
+  const base = defaultState();
+  const slots = Array.isArray(snapshot.slots) && snapshot.slots.length > 0 ? snapshot.slots : base.slots;
+  const legacyCourses = snapshot.courses?.map((course) => cleanCourse(course, slots));
+  const sourceClasses = Array.isArray(snapshot.classes) && snapshot.classes.length > 0 ? snapshot.classes : base.classes;
+  const classes: ClassData[] = sourceClasses.map((cls, index) => {
+    const savedCourses = cls.courses && cls.courses.length > 0
+      ? cls.courses.map((course) => cleanCourse(course, slots))
+      : legacyCourses
+        ? legacyCourses.map((course) => ({ ...course }))
+        : [];
+    return {
+      id: cls.id || `k${index + 1}`,
+      name: cls.name || `Class ${String.fromCharCode(65 + index)}`,
+      grid: cls.grid ?? {},
+      courses: savedCourses,
+    };
+  });
+  return {
+    fromDate: snapshot.fromDate || base.fromDate,
+    toDate: snapshot.toDate || base.toDate,
+    slots,
+    classes,
+  };
+};
+
 type Tool =
   | { kind: "course"; courseId: string }
   | { kind: "break" }
@@ -189,36 +246,7 @@ function Index() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) as Partial<State>;
-        const base = defaultState();
-        // Migrate v4 → v5: top-level `courses` moved into each class
-        const normalizeCourse = (course: Course & { allowedPeriods?: number[] }): Course => {
-          const { allowedPeriods, ...rest } = course;
-          return {
-            ...rest,
-            allowedSlots: rest.allowedSlots ?? allowedPeriods ?? [],
-            durationSlots: Math.max(1, rest.durationSlots ?? 1),
-            weeklyPeriods: Math.max(0, rest.weeklyPeriods ?? 0),
-          };
-        };
-        const legacyCourses: Course[] | undefined = (parsed as { courses?: Course[] }).courses?.map(normalizeCourse);
-        const migratedClasses: ClassData[] = (parsed.classes ?? base.classes).map(
-          (cls) => ({
-            ...cls,
-            courses:
-              (cls as ClassData).courses && (cls as ClassData).courses.length > 0
-                ? (cls as ClassData).courses.map(normalizeCourse)
-                : legacyCourses
-                  ? legacyCourses.map((c) => ({ ...c }))
-                  : [],
-          }),
-        );
-        const merged: State = {
-          ...base,
-          ...parsed,
-          slots: parsed.slots ?? base.slots,
-          classes: migratedClasses,
-        };
+        const merged = normalizeStateSnapshot(JSON.parse(raw) as SavedState);
         setState(merged);
         setActiveClassId(merged.classes[0]?.id ?? "");
       } else {
@@ -319,7 +347,7 @@ function Index() {
         let span = 1;
         if (tool.kind === "course") {
           const course = cls.courses.find((c) => c.id === tool.courseId);
-          span = Math.max(1, course?.durationSlots ?? 1);
+        span = cleanDurationSlots(course?.durationSlots, s.slots);
         }
         for (let k = 0; k < span; k++) {
           const idx = slotIdx + k;
@@ -543,7 +571,7 @@ function Index() {
       };
 
       const spanFitsCourse = (course: Course, start: number): boolean => {
-        for (let i = 0; i < Math.max(1, course.durationSlots); i++) {
+        for (let i = 0; i < cleanDurationSlots(course.durationSlots, s.slots); i++) {
           const idx = start + i;
           if (idx >= s.slots.length) return false;
           if (s.slots[idx].isBreak) return false;
@@ -558,7 +586,7 @@ function Index() {
         const possibleStarts = startSlotsFor(course);
         if (!possibleStarts.includes(start)) return false;
         if (!spanFitsCourse(course, start)) return false;
-        for (let i = 0; i < Math.max(1, course.durationSlots); i++) {
+        for (let i = 0; i < cleanDurationSlots(course.durationSlots, s.slots); i++) {
           const idx = start + i;
           const key = `${date}-${idx}`;
           const existing = cls.grid[key];
@@ -639,7 +667,7 @@ function Index() {
             }
             if (!best) continue;
             // Place
-            const span = Math.max(1, task.course.durationSlots ?? 1);
+            const span = cleanDurationSlots(task.course.durationSlots, s.slots);
             for (let i = 0; i < span; i++) {
               const key = `${best.date}-${best.slot + i}`;
               task.cls.grid[key] = { kind: "course", courseId: task.course.id };
@@ -921,14 +949,16 @@ function Index() {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
-      const loaded: State | undefined = parsed?.state ?? parsed;
+      const loaded: SavedState | undefined = parsed?.state ?? parsed;
       if (!loaded || !Array.isArray(loaded.classes) || !Array.isArray(loaded.slots)) {
         alert("This doesn't look like a valid .aadhi file.");
         return;
       }
       if (!confirm("Load this file? Your current timetable will be replaced.")) return;
-      setState(loaded);
-      setActiveClassId(loaded.classes[0]?.id ?? "");
+      const normalized = normalizeStateSnapshot(loaded);
+      setState(normalized);
+      setActiveClassId(normalized.classes[0]?.id ?? "");
+      setAutoFillReport("Loaded .aadhi file. Course span values above the available periods were corrected to 1.");
     } catch {
       alert("Could not read this .aadhi file.");
     }
@@ -1082,15 +1112,16 @@ function Index() {
                         <input
                           type="number"
                           min={1}
+                          max={Math.max(1, nonBreakCount(state.slots))}
                           value={c.durationSlots}
                           onChange={(e) =>
                             updateCourse(c.id, {
-                              durationSlots: Math.max(1, parseInt(e.target.value || "1", 10)),
+                              durationSlots: cleanDurationSlots(e.target.value, state.slots),
                             })
                           }
                           className="w-10 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
                         />
-                        <span>len</span>
+                        <span title="Consecutive periods per session">span</span>
                       </label>
                       <label
                         title="Sessions per week (auto-fill target)"
