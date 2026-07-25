@@ -619,7 +619,7 @@ function Index() {
                         ×
                       </button>
                     </div>
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 px-3 py-2">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2 px-3 py-2">
                       <input
                         value={c.faculty}
                         onChange={(e) => updateCourse(c.id, { faculty: e.target.value })}
@@ -641,7 +641,25 @@ function Index() {
                           }
                           className="w-10 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
                         />
-                        <span>slot</span>
+                        <span>len</span>
+                      </label>
+                      <label
+                        title="Sessions per week (auto-fill target)"
+                        className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
+                        style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                      >
+                        <input
+                          type="number"
+                          min={0}
+                          value={c.weeklyPeriods ?? 0}
+                          onChange={(e) =>
+                            updateCourse(c.id, {
+                              weeklyPeriods: Math.max(0, parseInt(e.target.value || "0", 10)),
+                            })
+                          }
+                          className="w-10 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
+                        />
+                        <span>/wk</span>
                       </label>
                     </div>
                     <button
