@@ -164,6 +164,13 @@ function Index() {
   const [bulkSlots, setBulkSlots] = useState<number[]>([]);
   const [bulkAllClasses, setBulkAllClasses] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Map slot index → 1-based period number, skipping breaks.
+  const periodNumberFor = (slotIdx: number): number =>
+    state.slots.slice(0, slotIdx + 1).filter((x) => !x.isBreak).length;
+  const periodLabelFor = (slotIdx: number): string =>
+    state.slots[slotIdx]?.isBreak ? "Br" : `P${periodNumberFor(slotIdx)}`;
 
   useEffect(() => {
     setHydrated(true);
@@ -722,6 +729,42 @@ function Index() {
     });
   };
 
+  // Save / Load .aadhi file (full app state snapshot)
+  const saveAadhi = () => {
+    const payload = {
+      app: "timetable-maker",
+      version: 5,
+      savedAt: new Date().toISOString(),
+      state,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `timetable_${stamp}.aadhi`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const loadAadhi = async (file: File) => {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const loaded: State | undefined = parsed?.state ?? parsed;
+      if (!loaded || !Array.isArray(loaded.classes) || !Array.isArray(loaded.slots)) {
+        alert("This doesn't look like a valid .aadhi file.");
+        return;
+      }
+      if (!confirm("Load this file? Your current timetable will be replaced.")) return;
+      setState(loaded);
+      setActiveClassId(loaded.classes[0]?.id ?? "");
+    } catch {
+      alert("Could not read this .aadhi file.");
+    }
+  };
+
   const cellDisplay = (cell: Cell | undefined, courses: Course[]) => {
     if (!cell || cell.kind === "empty") return { text: "", bg: "#fff", fg: "#94a3b8" };
     if (cell.kind === "break") return { text: cell.label, bg: "#fef3c7", fg: "#92400e" };
@@ -909,7 +952,7 @@ function Index() {
                           : "All days"}
                         {" · "}
                         {c.allowedSlots && c.allowedSlots.length > 0
-                          ? `P${c.allowedSlots.map((i) => i + 1).join(" P")}`
+                          ? c.allowedSlots.map((i) => `P${periodNumberFor(i)}`).join(" ")
                           : "All periods"}
                       </span>
                     </button>
@@ -1188,6 +1231,31 @@ function Index() {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".aadhi,application/json"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) loadAadhi(f);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
+                title="Load a .aadhi file"
+              >
+                Load
+              </button>
+              <button
+                onClick={saveAadhi}
+                className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
+                title="Save as .aadhi file"
+              >
+                Save
+              </button>
               <button
                 onClick={exportCSV}
                 className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
@@ -1465,7 +1533,9 @@ function Index() {
                             ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(",")
                             : "any day",
                           c.allowedSlots && c.allowedSlots.length > 0
-                            ? "P" + c.allowedSlots.map((i) => i + 1).join(",")
+                            ? c.allowedSlots
+                                .map((i) => `P${periodNumberFor(i)}`)
+                                .join(",")
                             : "any period",
                         ].join(" · ")
                       : null;
