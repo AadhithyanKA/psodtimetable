@@ -505,6 +505,21 @@ function Index() {
                         placeholder="Faculty"
                         className="w-full rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
                       />
+                      <label className="flex items-center gap-2 text-xs text-slate-600">
+                        Duration
+                        <input
+                          type="number"
+                          min={1}
+                          value={c.durationSlots}
+                          onChange={(e) =>
+                            updateCourse(c.id, {
+                              durationSlots: Math.max(1, parseInt(e.target.value || "1", 10)),
+                            })
+                          }
+                          className="w-14 rounded border border-slate-200 px-2 py-1 text-xs"
+                        />
+                        <span>slot(s)</span>
+                      </label>
                     </div>
                     <button
                       onClick={() => removeCourse(c.id)}
