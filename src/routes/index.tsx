@@ -1173,16 +1173,19 @@ function Index() {
   const downloadBlockTemplate = () => {
     const nonBreakCount = state.slots.filter((sl) => !sl.isBreak).length || 8;
     const d0 = state.fromDate || isoToday();
+    const toDMY = (iso: string) => {
+      const [y, m, d] = iso.split("-");
+      return `${d}/${m}/${y}`;
+    };
     const sample = [
-      "# Auto-block template. Save as .csv and upload via 'Upload blocker CSV'.",
-      "# date   = YYYY-MM-DD",
-      `# periods = 'all' | comma/range list of period numbers (1..${nonBreakCount}), e.g. '1,2' or '5-${nonBreakCount}'`,
-      "# label  = optional text shown in the blocked cell (default: Block)",
-      "# scope  = optional 'all' (default) or exact class name; case-insensitive",
-      "date,periods,label,scope",
-      `${d0},all,Holiday,all`,
-      `${addDays(d0, 1)},7-${nonBreakCount},Sports,all`,
-      `${addDays(d0, 2)},"1,2",Assembly,${state.classes[0]?.name ?? "Class A"}`,
+      "# Blocker template. Save as .csv and upload via 'Upload blocker CSV'.",
+      "# date    = DD/MM/YYYY",
+      "# Reason  = shown in the blocked cell",
+      `# Session = 'all' to block the whole day, or comma list of periods (1..${nonBreakCount}), e.g. '1,3,5,6'`,
+      "date,Reason,Session",
+      `${toDMY(d0)},Holiday,all`,
+      `${toDMY(addDays(d0, 1))},Sports,"7,${nonBreakCount}"`,
+      `${toDMY(addDays(d0, 2))},Assembly,"1,3,5,6"`,
     ].join("\n");
     const blob = new Blob([sample], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -1219,10 +1222,28 @@ function Index() {
     if (rawLines.length === 0) { alert("CSV is empty."); return; }
     const header = parseCsvRow(rawLines[0]).map((c) => c.toLowerCase());
     const dateIdx = header.indexOf("date");
-    const periodsIdx = header.indexOf("periods");
-    const labelIdx = header.indexOf("label");
+    const periodsIdx = (() => {
+      const i = header.indexOf("session");
+      return i >= 0 ? i : header.indexOf("periods");
+    })();
+    const labelIdx = (() => {
+      const i = header.indexOf("reason");
+      return i >= 0 ? i : header.indexOf("label");
+    })();
     const scopeIdx = header.indexOf("scope");
     if (dateIdx < 0) { alert("CSV missing required 'date' column."); return; }
+
+    const normalizeDate = (raw: string): string => {
+      const s = (raw || "").trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+      if (!m) return "";
+      const d = m[1].padStart(2, "0");
+      const mo = m[2].padStart(2, "0");
+      let y = m[3];
+      if (y.length === 2) y = (parseInt(y, 10) > 50 ? "19" : "20") + y;
+      return `${y}-${mo}-${d}`;
+    };
 
     const nonBreakIdxs = state.slots.map((sl, i) => ({ sl, i })).filter((x) => !x.sl.isBreak).map((x) => x.i);
     const parsePeriods = (str: string): number[] => {
@@ -1246,8 +1267,8 @@ function Index() {
       const classes: ClassData[] = s.classes.map((cls) => ({ ...cls, grid: { ...cls.grid } }));
       rawLines.slice(1).forEach((line, i) => {
         const cells = parseCsvRow(line);
-        const date = cells[dateIdx];
-        if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) { errors.push(`Row ${i + 2}: bad date "${date}"`); skipped++; return; }
+        const date = normalizeDate(cells[dateIdx]);
+        if (!date) { errors.push(`Row ${i + 2}: bad date "${cells[dateIdx]}" (use DD/MM/YYYY)`); skipped++; return; }
         const periods = parsePeriods(periodsIdx >= 0 ? cells[periodsIdx] : "all");
         if (periods.length === 0) { errors.push(`Row ${i + 2}: no valid periods parsed from "${cells[periodsIdx] ?? ""}"`); noPeriods++; skipped++; return; }
         if (!inRange.has(date)) { errors.push(`Row ${i + 2}: date ${date} is outside timetable range ${s.fromDate}..${s.toDate}`); outOfRange++; skipped++; return; }
