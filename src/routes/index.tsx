@@ -708,16 +708,10 @@ function Index() {
         const perSlot: Record<number, number> = {};
         dateList.forEach((d) => {
           perDay[d] = 0;
-          s.slots.forEach((_, i) => {
-            const cell = cls.grid[`${d}-${i}`];
-            if (cell?.kind !== "course" || cell.courseId !== course.id) return;
-            const prev = cls.grid[`${d}-${i - 1}`];
-            if (!prev || prev.kind !== "course" || prev.courseId !== course.id) {
-              placed++;
-              perDay[d]++;
-              perSlot[i] = (perSlot[i] ?? 0) + 1;
-            }
-          });
+        });
+        placed = countCourseSessionsInDates(cls.grid, course, s.slots, dateList, (d, i) => {
+          perDay[d] = (perDay[d] ?? 0) + 1;
+          perSlot[i] = (perSlot[i] ?? 0) + 1;
         });
         return { placed, perDay, perSlot };
       };
