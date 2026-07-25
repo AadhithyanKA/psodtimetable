@@ -371,6 +371,8 @@ function Index() {
   const [bulkAllClasses, setBulkAllClasses] = useState(false);
   const [autoFillReport, setAutoFillReport] = useState<string>("");
   const [pendingScrollClassId, setPendingScrollClassId] = useState<string | null>(null);
+  const [pendingBlockCsv, setPendingBlockCsv] = useState<{ name: string; text: string } | null>(null);
+  const [blockReport, setBlockReport] = useState<string>("");
   const gridRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
