@@ -723,7 +723,11 @@ function Index() {
           const existing = cls.grid[key];
           if (existing?.kind === "blocked") return "slot is blocked";
           if (existing?.kind === "break") return "slot is a break";
-          if (existing?.kind === "course") return "class already has a course there";
+          if (existing?.kind === "course") {
+            return existing.courseId === course.id
+              ? "selected rule slots already filled"
+              : "class already has another course there";
+          }
           if (facultyBusy[key]?.has(course.faculty)) {
             const busy = classes
               .filter((other) => other.id !== cls.id)
@@ -775,8 +779,12 @@ function Index() {
           startsByDate[d] = starts;
           possibleStarts += starts.length;
         });
-        if (desiredSessions <= 0 && opts.strictRules && possibleStarts > 0) {
-          desiredSessions = possibleStarts;
+        if (opts.strictRules && possibleStarts > 0) {
+          desiredSessions = desiredSessions <= 0
+            ? possibleStarts
+            : Math.min(desiredSessions, possibleStarts);
+        } else if (desiredSessions > 0 && possibleStarts > 0) {
+          desiredSessions = Math.min(desiredSessions, possibleStarts);
         }
         if (desiredSessions <= 0) return;
         const { placed, perDay, perSlot } = countPlacedStarts(cls, course, dateList);
@@ -884,7 +892,10 @@ function Index() {
             reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
           });
         });
-        const topReason = [...reasonCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+        const rankedReasons = [...reasonCounts.entries()].sort((a, b) => b[1] - a[1]);
+        const topReason =
+          rankedReasons.find(([reason]) => reason !== "selected rule slots already filled")?.[0] ??
+          rankedReasons[0]?.[0];
         unmet.push(
           `${task.cls.name} · ${task.course.name}: ${task.remaining} left${openNow === 0 ? ` (${topReason ?? "no open rule slots"})` : ` (${openNow} open rule slots)`}`,
         );
