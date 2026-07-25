@@ -1173,16 +1173,19 @@ function Index() {
   const downloadBlockTemplate = () => {
     const nonBreakCount = state.slots.filter((sl) => !sl.isBreak).length || 8;
     const d0 = state.fromDate || isoToday();
+    const toDMY = (iso: string) => {
+      const [y, m, d] = iso.split("-");
+      return `${d}/${m}/${y}`;
+    };
     const sample = [
-      "# Auto-block template. Save as .csv and upload via 'Upload blocker CSV'.",
-      "# date   = YYYY-MM-DD",
-      `# periods = 'all' | comma/range list of period numbers (1..${nonBreakCount}), e.g. '1,2' or '5-${nonBreakCount}'`,
-      "# label  = optional text shown in the blocked cell (default: Block)",
-      "# scope  = optional 'all' (default) or exact class name; case-insensitive",
-      "date,periods,label,scope",
-      `${d0},all,Holiday,all`,
-      `${addDays(d0, 1)},7-${nonBreakCount},Sports,all`,
-      `${addDays(d0, 2)},"1,2",Assembly,${state.classes[0]?.name ?? "Class A"}`,
+      "# Blocker template. Save as .csv and upload via 'Upload blocker CSV'.",
+      "# date    = DD/MM/YYYY",
+      "# Reason  = shown in the blocked cell",
+      `# Session = 'all' to block the whole day, or comma list of periods (1..${nonBreakCount}), e.g. '1,3,5,6'`,
+      "date,Reason,Session",
+      `${toDMY(d0)},Holiday,all`,
+      `${toDMY(addDays(d0, 1))},Sports,"7,${nonBreakCount}"`,
+      `${toDMY(addDays(d0, 2))},Assembly,"1,3,5,6"`,
     ].join("\n");
     const blob = new Blob([sample], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
