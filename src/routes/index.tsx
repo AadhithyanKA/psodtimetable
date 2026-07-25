@@ -42,6 +42,9 @@ type Course = {
   allowedWeekdays?: number[];
   // Slot indices. undefined or empty = allowed in all periods.
   allowedSlots?: number[];
+  // Optional active date range for this course. Undefined = entire timetable range.
+  fromDate?: string; // YYYY-MM-DD
+  toDate?: string; // YYYY-MM-DD
 };
 type ClassData = { id: string; name: string; grid: Record<string, Cell>; courses: Course[] };
 type Slot = { start: string; end: string; isBreak?: boolean }; // 24h "HH:MM"
