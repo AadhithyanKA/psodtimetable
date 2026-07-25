@@ -744,7 +744,7 @@ function Index() {
           const idx = start + i;
           if (idx >= s.slots.length) return false;
           if (s.slots[idx].isBreak) return false;
-          if (!opts.strictRules && !courseAllowedSlotOn(course, idx, date)) return false;
+          if (!courseAllowedSlotOn(course, idx, date)) return false;
         }
         return true;
       };
@@ -803,8 +803,10 @@ function Index() {
           perDay[d] = 0;
         });
         placed = countCourseSessionsInDates(cls.grid, course, s.slots, dateList, (d, i) => {
+          if (!courseAllowedOn(course, d) || !spanFitsCourse(course, i, d)) return;
           perDay[d] = (perDay[d] ?? 0) + 1;
           perSlot[i] = (perSlot[i] ?? 0) + 1;
+          placed++;
         });
         return { placed, perDay, perSlot };
       };
