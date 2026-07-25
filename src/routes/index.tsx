@@ -412,7 +412,7 @@ function Index() {
           if (s.slots[idx].isBreak) continue; // never write into break slots
           if (tool.kind === "course") {
             const course = cls.courses.find((c) => c.id === tool.courseId);
-            if (course && !courseAllowedSlot(course, idx)) continue;
+            if (course && !courseAllowedSlotOn(course, idx, date)) continue;
           }
           const key = `${date}-${idx}`;
           if (tool.kind === "erase") delete grid[key];
