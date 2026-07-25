@@ -594,7 +594,7 @@ function Index() {
                 </button>
               </div>
               <div className="space-y-2">
-                {state.courses.map((c) => (
+                {activeClass?.courses ?? [].map((c) => (
                   <div key={c.id} className="border border-[#0d0d0d]/30 bg-white">
                     <div className="flex items-center gap-2 border-b border-[#0d0d0d]/10 px-3 py-2">
                       <span
@@ -949,11 +949,11 @@ function Index() {
                       className="inline-block h-3 w-3"
                       style={{
                         backgroundColor:
-                          state.courses.find((c) => c.id === armedTool.courseId)?.color ?? "#ddd",
+                          activeClass?.courses ?? [].find((c) => c.id === armedTool.courseId)?.color ?? "#ddd",
                       }}
                     />
                     <span className="font-bold">
-                      {state.courses.find((c) => c.id === armedTool.courseId)?.name ?? "?"}
+                      {activeClass?.courses ?? [].find((c) => c.id === armedTool.courseId)?.name ?? "?"}
                     </span>
                   </span>
                 ) : (
@@ -1059,7 +1059,7 @@ function Index() {
 
                           const course =
                             cell?.kind === "course"
-                              ? state.courses.find((c) => c.id === cell.courseId)
+                              ? activeClass?.courses ?? [].find((c) => c.id === cell.courseId)
                               : undefined;
 
                           return (
@@ -1163,12 +1163,12 @@ function Index() {
                 Courses
               </div>
               <div className="mb-4 space-y-1">
-                {state.courses.length === 0 && (
+                {activeClass?.courses ?? [].length === 0 && (
                   <div className="text-xs text-[#2d2d2d]/60">
                     No courses yet. Add one from the sidebar.
                   </div>
                 )}
-                {state.courses.map((c) => {
+                {activeClass?.courses ?? [].map((c) => {
                   const allowed = courseAllowedOn(c, picker.date);
                   const ruleLabel =
                     c.allowedWeekdays && c.allowedWeekdays.length > 0
