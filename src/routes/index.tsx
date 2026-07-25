@@ -164,6 +164,13 @@ function Index() {
   const [bulkSlots, setBulkSlots] = useState<number[]>([]);
   const [bulkAllClasses, setBulkAllClasses] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Map slot index → 1-based period number, skipping breaks.
+  const periodNumberFor = (slotIdx: number): number =>
+    state.slots.slice(0, slotIdx + 1).filter((x) => !x.isBreak).length;
+  const periodLabelFor = (slotIdx: number): string =>
+    state.slots[slotIdx]?.isBreak ? "Br" : `P${periodNumberFor(slotIdx)}`;
 
   useEffect(() => {
     setHydrated(true);
@@ -720,6 +727,42 @@ function Index() {
       a.click();
       URL.revokeObjectURL(url);
     });
+  };
+
+  // Save / Load .aadhi file (full app state snapshot)
+  const saveAadhi = () => {
+    const payload = {
+      app: "timetable-maker",
+      version: 5,
+      savedAt: new Date().toISOString(),
+      state,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `timetable_${stamp}.aadhi`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const loadAadhi = async (file: File) => {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const loaded: State | undefined = parsed?.state ?? parsed;
+      if (!loaded || !Array.isArray(loaded.classes) || !Array.isArray(loaded.slots)) {
+        alert("This doesn't look like a valid .aadhi file.");
+        return;
+      }
+      if (!confirm("Load this file? Your current timetable will be replaced.")) return;
+      setState(loaded);
+      setActiveClassId(loaded.classes[0]?.id ?? "");
+    } catch {
+      alert("Could not read this .aadhi file.");
+    }
   };
 
   const cellDisplay = (cell: Cell | undefined, courses: Course[]) => {
