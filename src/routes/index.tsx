@@ -149,9 +149,6 @@ function Index() {
         const merged: State = {
           ...base,
           ...parsed,
-          startTime: parsed.startTime ?? base.startTime,
-          endTime: parsed.endTime ?? base.endTime,
-          slotMinutes: parsed.slotMinutes ?? base.slotMinutes,
           slots: parsed.slots ?? base.slots,
           courses: parsed.courses ?? base.courses,
           classes: parsed.classes ?? base.classes,
@@ -165,26 +162,42 @@ function Index() {
     if (hydrated) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state, hydrated]);
 
-  // Auto-regenerate slot labels + clip grids whenever time settings change.
-  useEffect(() => {
-    setState((s) => {
-      const nextSlots = buildSlots(s.startTime, s.endTime, s.slotMinutes);
-      const sameLen = nextSlots.length === s.slots.length;
-      const sameLabels = sameLen && nextSlots.every((v, i) => v === s.slots[i]);
-      if (sameLabels) return s;
-      const maxIdx = nextSlots.length;
-      const classes = s.classes.map((cls) => {
-        const grid: Record<string, Cell> = {};
-        Object.entries(cls.grid).forEach(([k, v]) => {
-          const m = k.match(/^(.+)-(\d+)$/);
-          if (!m) return;
-          if (parseInt(m[2], 10) < maxIdx) grid[k] = v;
-        });
-        return { ...cls, grid };
+  // Slot editors
+  const clipGrids = (classes: ClassData[], maxIdx: number): ClassData[] =>
+    classes.map((cls) => {
+      const grid: Record<string, Cell> = {};
+      Object.entries(cls.grid).forEach(([k, v]) => {
+        const m = k.match(/^(.+)-(\d+)$/);
+        if (!m) return;
+        if (parseInt(m[2], 10) < maxIdx) grid[k] = v;
       });
-      return { ...s, slots: nextSlots, classes };
+      return { ...cls, grid };
     });
-  }, [state.startTime, state.endTime, state.slotMinutes]);
+  const updateSlot = (i: number, patch: Partial<Slot>) =>
+    setState((s) => ({
+      ...s,
+      slots: s.slots.map((sl, idx) => (idx === i ? { ...sl, ...patch } : sl)),
+    }));
+  const addSlot = () =>
+    setState((s) => {
+      const last = s.slots[s.slots.length - 1];
+      const start = last ? last.end : "09:00";
+      const startM = parseHM(start);
+      const endM = Math.min(24 * 60 - 1, startM + 55);
+      const end = `${String(Math.floor(endM / 60)).padStart(2, "0")}:${String(endM % 60).padStart(2, "0")}`;
+      return { ...s, slots: [...s.slots, { start, end }] };
+    });
+  const removeSlot = (i: number) =>
+    setState((s) => ({
+      ...s,
+      slots: s.slots.filter((_, idx) => idx !== i),
+      classes: clipGrids(s.classes, s.slots.length - 1),
+    }));
+  const toggleSlotBreak = (i: number) =>
+    setState((s) => ({
+      ...s,
+      slots: s.slots.map((sl, idx) => (idx === i ? { ...sl, isBreak: !sl.isBreak } : sl)),
+    }));
 
   useEffect(() => {
     const up = () => setIsPainting(false);
