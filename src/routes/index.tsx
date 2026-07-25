@@ -1226,6 +1226,11 @@ function Index() {
                   Regen Rules
                 </button>
               </div>
+              {autoFillReport && (
+                <div className="mb-3 border border-[#0d0d0d]/30 bg-white px-3 py-2 text-[11px] font-bold text-[#2d2d2d]">
+                  {autoFillReport}
+                </div>
+              )}
 
               <div className="border-t border-dashed border-[#0d0d0d]/30 pt-3">
                 <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/60">
