@@ -1343,6 +1343,13 @@ function Index() {
                 CSV
               </button>
               <button
+                onClick={exportASC}
+                className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
+                title="Export as ASCII text (.asc)"
+              >
+                ASC
+              </button>
+              <button
                 onClick={exportExcel}
                 className="border-2 border-[#0d0d0d] bg-[#0d0d0d] px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#f5f3ee] transition-transform hover:opacity-90 active:translate-y-0.5"
               >
