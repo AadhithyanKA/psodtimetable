@@ -418,6 +418,7 @@ function Index() {
               faculty: "Faculty",
               color: COLORS[cls.courses.length % COLORS.length],
               durationSlots: 1,
+              weeklyPeriods: 3,
             },
           ],
         };
