@@ -375,7 +375,7 @@ function Index() {
             if (!course) return;
             (facultyToClass[course.faculty] ??= []).push(cls.id);
             // Rule violation: course placed on a weekday or period it isn't allowed
-            if (!courseAllowedOn(course, date) || !courseAllowedSlot(course, i)) {
+            if (!courseAllowedOn(course, date) || !courseAllowedSlotOn(course, i, date)) {
               set.add(`${cls.id}:${key}`);
             }
           }
