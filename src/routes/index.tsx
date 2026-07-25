@@ -1027,6 +1027,68 @@ function Index() {
               </div>
             </section>
 
+            {/* Auto-fill + CSV blocker */}
+            <section className="border border-dashed border-[#0d0d0d]/50 bg-[#f5f3ee] p-4">
+              <h3
+                className="mb-2 text-[11px] font-bold uppercase tracking-widest"
+                style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+              >
+                Auto-fill & Blocker
+              </h3>
+              <p className="mb-3 text-[11px] text-[#2d2d2d]/70">
+                Auto-fill packs each course into the week using its <b>/wk</b> target,
+                respecting duration, breaks, blocks, per-course rules, and faculty
+                overlaps across every class.
+              </p>
+              <div className="mb-3 grid grid-cols-2 gap-1">
+                <button
+                  onClick={() => autoPopulate({ overwrite: false })}
+                  className="border-2 border-[#0d0d0d] bg-white px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
+                >
+                  Fill Empty
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm("Clear all courses and re-generate?")) autoPopulate({ overwrite: true });
+                  }}
+                  className="border-2 border-[#0d0d0d] bg-[#0d0d0d] px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#f5f3ee] hover:opacity-90"
+                >
+                  Regenerate
+                </button>
+              </div>
+
+              <div className="border-t border-dashed border-[#0d0d0d]/30 pt-3">
+                <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/60">
+                  Block dates via CSV
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <button
+                    onClick={downloadBlockTemplate}
+                    className="border border-[#0d0d0d]/60 bg-white px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
+                  >
+                    Template
+                  </button>
+                  <label className="cursor-pointer border border-[#0d0d0d] bg-[#0d0d0d] px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#f5f3ee] hover:opacity-90">
+                    Upload CSV
+                    <input
+                      type="file"
+                      accept=".csv,text/csv"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) importBlockCsv(f);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+                <p className="mt-2 text-[10px] text-[#2d2d2d]/60">
+                  Columns: <code>date, periods, label, scope</code>. Periods are 1-based
+                  over non-break slots (e.g. <code>1,2</code> or <code>5-8</code> or <code>all</code>).
+                </p>
+              </div>
+            </section>
+
             {/* Time slots editor */}
             <section>
               <div className="mb-3 flex items-center justify-between">
