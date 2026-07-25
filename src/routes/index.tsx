@@ -952,7 +952,7 @@ function Index() {
                           : "All days"}
                         {" · "}
                         {c.allowedSlots && c.allowedSlots.length > 0
-                          ? `P${c.allowedSlots.map((i) => i + 1).join(" P")}`
+                          ? c.allowedSlots.map((i) => `P${periodNumberFor(i)}`).join(" ")
                           : "All periods"}
                       </span>
                     </button>
@@ -1508,7 +1508,9 @@ function Index() {
                             ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(",")
                             : "any day",
                           c.allowedSlots && c.allowedSlots.length > 0
-                            ? "P" + c.allowedSlots.map((i) => i + 1).join(",")
+                            ? c.allowedSlots
+                                .map((i) => `P${periodNumberFor(i)}`)
+                                .join(",")
                             : "any period",
                         ].join(" · ")
                       : null;
