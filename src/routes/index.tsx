@@ -78,6 +78,15 @@ const dayLabel = (iso: string) => {
     date: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
   };
 };
+const weekdayOf = (iso: string): number =>
+  new Date(iso + "T00:00:00").getDay();
+const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
+const WEEKDAY_FULL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const courseAllowedOn = (course: Course, iso: string): boolean => {
+  const rule = course.allowedWeekdays;
+  if (!rule || rule.length === 0) return true;
+  return rule.includes(weekdayOf(iso));
+};
 
 const parseHM = (s: string): number => {
   const [h, m] = s.split(":").map((x) => parseInt(x, 10));
