@@ -1220,6 +1220,170 @@ function Index() {
           </div>
         </div>
       )}
+
+      {/* Rules editor modal */}
+      {rulesFor && activeClass && (() => {
+        const course = activeClass.courses.find((c) => c.id === rulesFor);
+        if (!course) return null;
+        const wdRule = course.allowedWeekdays ?? [];
+        const wdAll = wdRule.length === 0;
+        const slotRule = course.allowedSlots ?? [];
+        const slotAll = slotRule.length === 0;
+        const nonBreakIdxs = state.slots
+          .map((sl, i) => ({ sl, i }))
+          .filter((x) => !x.sl.isBreak);
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-[#0d0d0d]/60 p-4"
+            onClick={() => setRulesFor(null)}
+          >
+            <div
+              className="w-full max-w-md border-2 border-[#0d0d0d] bg-[#f5f3ee]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between border-b-2 border-[#0d0d0d] bg-[#0d0d0d] px-4 py-3 text-[#f5f3ee]">
+                <div className="min-w-0">
+                  <div className="text-[10px] uppercase tracking-widest text-[#f5f3ee]/60">
+                    Course rules · {activeClass.name}
+                  </div>
+                  <div
+                    className="truncate text-base font-bold"
+                    style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                  >
+                    {course.name}{" "}
+                    <span className="text-xs font-normal text-[#f5f3ee]/60">
+                      · {course.faculty}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setRulesFor(null)}
+                  className="text-lg leading-none text-[#f5f3ee]/60 hover:text-[#f5f3ee]"
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="max-h-[70vh] overflow-y-auto p-4 space-y-4">
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                      Available weekdays
+                    </span>
+                    <button
+                      onClick={() => updateCourse(course.id, { allowedWeekdays: [] })}
+                      className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                    >
+                      All days
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {WEEKDAY_LABELS.map((lbl, wd) => {
+                      const active = wdAll || wdRule.includes(wd);
+                      return (
+                        <button
+                          key={wd}
+                          title={WEEKDAY_FULL[wd]}
+                          onClick={() => {
+                            const base = wdAll ? [0, 1, 2, 3, 4, 5, 6] : [...wdRule];
+                            const next = base.includes(wd)
+                              ? base.filter((x) => x !== wd)
+                              : [...base, wd].sort();
+                            updateCourse(course.id, {
+                              allowedWeekdays: next.length === 7 ? [] : next,
+                            });
+                          }}
+                          className={
+                            "flex h-9 w-9 items-center justify-center border text-xs font-bold " +
+                            (active
+                              ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
+                              : "border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/40 hover:border-[#0d0d0d]/50")
+                          }
+                          style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                        >
+                          {lbl}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-1 text-[10px] text-[#2d2d2d]/50">
+                    Pick the weekdays this faculty is available. Deselect all to
+                    treat every day as allowed.
+                  </p>
+                </div>
+
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                      Available periods
+                    </span>
+                    <button
+                      onClick={() => updateCourse(course.id, { allowedSlots: [] })}
+                      className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                    >
+                      All periods
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                    {nonBreakIdxs.map(({ sl, i }) => {
+                      const active = slotAll || slotRule.includes(i);
+                      const periodNum =
+                        state.slots.slice(0, i + 1).filter((x) => !x.isBreak).length;
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => {
+                            const allIdxs = nonBreakIdxs.map((x) => x.i);
+                            const base = slotAll ? [...allIdxs] : [...slotRule];
+                            const next = base.includes(i)
+                              ? base.filter((x) => x !== i)
+                              : [...base, i].sort((a, b) => a - b);
+                            updateCourse(course.id, {
+                              allowedSlots:
+                                next.length === allIdxs.length ? [] : next,
+                            });
+                          }}
+                          className={
+                            "flex items-center justify-between gap-2 border px-2 py-1.5 text-left text-xs " +
+                            (active
+                              ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
+                              : "border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/60 hover:border-[#0d0d0d]/50")
+                          }
+                        >
+                          <span
+                            className="font-bold"
+                            style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                          >
+                            P{periodNum}
+                          </span>
+                          <span
+                            className="text-[10px] opacity-80"
+                            style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                          >
+                            {slotLabel(sl)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-1 text-[10px] text-[#2d2d2d]/50">
+                    Pick the periods this course can be scheduled in. Break
+                    slots are excluded.
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end border-t-2 border-[#0d0d0d] bg-[#e8e4dd] px-4 py-2">
+                <button
+                  onClick={() => setRulesFor(null)}
+                  className="border-2 border-[#0d0d0d] bg-[#f5f3ee] px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider hover:bg-[#0d0d0d] hover:text-[#f5f3ee]"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
