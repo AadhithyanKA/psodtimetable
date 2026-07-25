@@ -93,7 +93,7 @@ const DEFAULT_SLOTS: Slot[] = [
   { start: "10:40", end: "10:50", isBreak: true },
   { start: "10:50", end: "11:45" },
   { start: "11:45", end: "12:35" },
-  { start: "12:35", end: "13:25" },
+  { start: "12:35", end: "13:25", isBreak: true },
   { start: "13:25", end: "14:20" },
   { start: "14:20", end: "14:30", isBreak: true },
   { start: "14:30", end: "15:25" },
