@@ -468,40 +468,6 @@ function Index() {
                 className="rounded border border-slate-300 px-2 py-1 text-sm"
               />
             </label>
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
-              Day starts
-              <input
-                type="time"
-                value={state.startTime}
-                onChange={(e) => setState((s) => ({ ...s, startTime: e.target.value }))}
-                className="rounded border border-slate-300 px-2 py-1 text-sm"
-              />
-            </label>
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
-              Day ends
-              <input
-                type="time"
-                value={state.endTime}
-                onChange={(e) => setState((s) => ({ ...s, endTime: e.target.value }))}
-                className="rounded border border-slate-300 px-2 py-1 text-sm"
-              />
-            </label>
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
-              Class length
-              <select
-                value={state.slotMinutes}
-                onChange={(e) =>
-                  setState((s) => ({ ...s, slotMinutes: parseInt(e.target.value, 10) }))
-                }
-                className="rounded border border-slate-300 px-2 py-1 text-sm"
-              >
-                {[30, 40, 45, 50, 55, 60, 75, 90, 100, 120].map((m) => (
-                  <option key={m} value={m}>
-                    {m} min
-                  </option>
-                ))}
-              </select>
-            </label>
             <button
               onClick={exportCSV}
               className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-100"
