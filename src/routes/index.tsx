@@ -536,11 +536,105 @@ function Index() {
             </div>
           </section>
 
+          <section className="rounded-lg border border-slate-200 bg-white p-4">
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-600">
+              Bulk block / break
+            </h2>
+            <div className="space-y-3 text-xs">
+              <div>
+                <div className="mb-1 font-medium text-slate-700">Weekdays</div>
+                <div className="flex flex-wrap gap-1">
+                  {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((w, i) => {
+                    const on = bulkWeekdays.includes(i);
+                    return (
+                      <button
+                        key={i}
+                        onClick={() =>
+                          setBulkWeekdays((prev) =>
+                            prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i],
+                          )
+                        }
+                        className={`rounded border px-2 py-1 ${
+                          on
+                            ? "border-slate-900 bg-slate-900 text-white"
+                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        {w}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <div className="mb-1 font-medium text-slate-700">Time slots</div>
+                <div className="max-h-40 space-y-1 overflow-y-auto rounded border border-slate-200 p-2">
+                  {state.slots.map((slot, i) => {
+                    const on = bulkSlots.includes(i);
+                    return (
+                      <label key={i} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={() =>
+                            setBulkSlots((prev) =>
+                              prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i],
+                            )
+                          }
+                        />
+                        <span>{slot}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={bulkAllClasses}
+                  onChange={(e) => setBulkAllClasses(e.target.checked)}
+                />
+                <span>Apply to all classes</span>
+              </label>
+              <div className="grid grid-cols-3 gap-1">
+                <button
+                  onClick={() =>
+                    applyBulk(bulkWeekdays, bulkSlots, "blocked", bulkAllClasses)
+                  }
+                  disabled={bulkWeekdays.length === 0 || bulkSlots.length === 0}
+                  className="rounded border border-slate-300 bg-slate-100 px-2 py-1 font-medium disabled:opacity-50"
+                >
+                  Block
+                </button>
+                <button
+                  onClick={() =>
+                    applyBulk(bulkWeekdays, bulkSlots, "break", bulkAllClasses)
+                  }
+                  disabled={bulkWeekdays.length === 0 || bulkSlots.length === 0}
+                  className="rounded border border-amber-200 bg-amber-100 px-2 py-1 font-medium text-amber-800 disabled:opacity-50"
+                >
+                  Break
+                </button>
+                <button
+                  onClick={() =>
+                    applyBulk(bulkWeekdays, bulkSlots, "erase", bulkAllClasses)
+                  }
+                  disabled={bulkWeekdays.length === 0 || bulkSlots.length === 0}
+                  className="rounded border border-slate-200 bg-white px-2 py-1 font-medium hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          </section>
+
           <section className="rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-600">
             <p className="font-semibold text-slate-700">How to use</p>
             <ol className="mt-2 list-decimal space-y-1 pl-4">
               <li>Click any empty cell → pick a course, break, or block.</li>
               <li>Then click-and-drag across cells to paint the same choice.</li>
+              <li>Set a course "Duration" to auto-fill consecutive slots.</li>
+              <li>Use Bulk block to disable e.g. last 2 slots every Wednesday.</li>
               <li>Faculty double-booked across classes gets flagged red.</li>
             </ol>
           </section>
