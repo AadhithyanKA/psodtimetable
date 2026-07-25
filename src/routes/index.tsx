@@ -1409,9 +1409,11 @@ function Index() {
                             const n = Math.max(0, parseInt(e.target.value || "0", 10));
                             updateCourse(c.id, { totalSessions: n > 0 ? n : undefined });
                           }}
-                          className="w-12 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
+                          className="w-12 border border-[#0d0d2d]/20 bg-white px-1 py-0.5 text-center text-xs"
                         />
-                        <span>total</span>
+                        <span>
+                          {coursePlacementCounts.get(c.id) ?? 0} / total
+                        </span>
                       </label>
                     </div>
                     <div className="grid grid-cols-2 gap-2 px-3 pb-2">
