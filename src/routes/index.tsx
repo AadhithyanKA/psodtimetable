@@ -238,6 +238,8 @@ function Index() {
             const course = state.courses.find((c) => c.id === cell.courseId);
             if (!course) return;
             (facultyToClass[course.faculty] ??= []).push(cls.id);
+            // Rule violation: course placed on a weekday its faculty doesn't work
+            if (!courseAllowedOn(course, date)) set.add(`${cls.id}:${key}`);
           }
         });
         Object.values(facultyToClass).forEach((clsIds) => {
@@ -249,6 +251,11 @@ function Index() {
   }, [state, dates]);
 
   const applyTool = (date: string, slotIdx: number, tool: Tool) => {
+    // Enforce course weekday rules — silently skip disallowed dates
+    if (tool.kind === "course") {
+      const course = state.courses.find((c) => c.id === tool.courseId);
+      if (course && !courseAllowedOn(course, date)) return;
+    }
     setState((s) => ({
       ...s,
       classes: s.classes.map((cls) => {
