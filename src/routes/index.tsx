@@ -1218,10 +1218,9 @@ function Index() {
     return out.map((v) => v.trim());
   };
 
-  const importBlockCsv = async (file: File) => {
-    const text = await file.text();
+  const applyBlockCsv = (text: string) => {
     const rawLines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
-    if (rawLines.length === 0) { alert("CSV is empty."); return; }
+    if (rawLines.length === 0) { setBlockReport("CSV is empty."); return; }
     const header = parseCsvRow(rawLines[0]).map((c) => c.toLowerCase());
     const dateIdx = header.indexOf("date");
     const periodsIdx = (() => {
@@ -1233,7 +1232,7 @@ function Index() {
       return i >= 0 ? i : header.indexOf("label");
     })();
     const scopeIdx = header.indexOf("scope");
-    if (dateIdx < 0) { alert("CSV missing required 'date' column."); return; }
+    if (dateIdx < 0) { setBlockReport("CSV missing required 'date' column."); return; }
 
     const normalizeDate = (raw: string): string => {
       const s = (raw || "").trim();
@@ -1295,9 +1294,9 @@ function Index() {
     const msg =
       `Applied ${applied} blocked cells.` +
       (skipped ? ` Skipped ${skipped} row(s).` : "") +
-      (extras.length ? `\n\n${extras.join("\n")}` : "") +
-      (errors.length ? `\n\n${errors.slice(0, 8).join("\n")}` : "");
-    alert(msg);
+      (extras.length ? ` ${extras.join(" ")}` : "") +
+      (errors.length ? ` ${errors.slice(0, 4).join(" | ")}` : "");
+    setBlockReport(msg);
   };
 
   // Export
