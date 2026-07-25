@@ -460,6 +460,21 @@ function Index() {
     });
   };
 
+  const clearTimetable = () => {
+    if (!confirm("Clear every course assignment from all classes? Breaks and blocked slots will stay.")) return;
+    setState((s) => ({
+      ...s,
+      classes: s.classes.map((cls) => {
+        const grid: Record<string, Cell> = {};
+        Object.entries(cls.grid).forEach(([key, cell]) => {
+          if (cell.kind !== "course") grid[key] = cell;
+        });
+        return { ...cls, grid };
+      }),
+    }));
+    setAutoFillReport("Timetable cleared — course assignments removed.");
+  };
+
   const onCellMouseDown = (date: string, slotIdx: number, e: React.MouseEvent) => {
     if (state.slots[slotIdx]?.isBreak) { e.preventDefault(); return; }
     // Alt + right-click erases immediately
