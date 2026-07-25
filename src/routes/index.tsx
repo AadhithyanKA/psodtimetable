@@ -802,7 +802,7 @@ function Index() {
         dateList.forEach((d) => {
           perDay[d] = 0;
         });
-        placed = countCourseSessionsInDates(cls.grid, course, s.slots, dateList, (d, i) => {
+        countCourseSessionsInDates(cls.grid, course, s.slots, dateList, (d, i) => {
           if (!courseAllowedOn(course, d) || !spanFitsCourse(course, i, d)) return;
           perDay[d] = (perDay[d] ?? 0) + 1;
           perSlot[i] = (perSlot[i] ?? 0) + 1;
