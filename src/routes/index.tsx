@@ -883,6 +883,7 @@ function Index() {
   // ------------ CSV block upload ------------
   const downloadBlockTemplate = () => {
     const nonBreakCount = state.slots.filter((sl) => !sl.isBreak).length || 8;
+    const d0 = state.fromDate || isoToday();
     const sample = [
       "# Auto-block template. Save as .csv and upload via 'Upload blocker CSV'.",
       "# date   = YYYY-MM-DD",
@@ -890,9 +891,9 @@ function Index() {
       "# label  = optional text shown in the blocked cell (default: Block)",
       "# scope  = optional 'all' (default) or exact class name; case-insensitive",
       "date,periods,label,scope",
-      `${isoToday()},all,Holiday,all`,
-      `${addDays(isoToday(), 1)},7-${nonBreakCount},Sports,all`,
-      `${addDays(isoToday(), 2)},"1,2",Assembly,${state.classes[0]?.name ?? "Class A"}`,
+      `${d0},all,Holiday,all`,
+      `${addDays(d0, 1)},7-${nonBreakCount},Sports,all`,
+      `${addDays(d0, 2)},"1,2",Assembly,${state.classes[0]?.name ?? "Class A"}`,
     ].join("\n");
     const blob = new Blob([sample], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -949,15 +950,18 @@ function Index() {
       return [...nums].map((n) => nonBreakIdxs[n - 1]).filter((x): x is number => x !== undefined);
     };
 
-    let applied = 0, skipped = 0;
+    let applied = 0, skipped = 0, outOfRange = 0, noPeriods = 0;
     const errors: string[] = [];
     setState((s) => {
+      const inRange = new Set(daysBetween(s.fromDate, s.toDate));
       const classes: ClassData[] = s.classes.map((cls) => ({ ...cls, grid: { ...cls.grid } }));
       rawLines.slice(1).forEach((line, i) => {
         const cells = parseCsvRow(line);
         const date = cells[dateIdx];
         if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) { errors.push(`Row ${i + 2}: bad date "${date}"`); skipped++; return; }
         const periods = parsePeriods(periodsIdx >= 0 ? cells[periodsIdx] : "all");
+        if (periods.length === 0) { errors.push(`Row ${i + 2}: no valid periods parsed from "${cells[periodsIdx] ?? ""}"`); noPeriods++; skipped++; return; }
+        if (!inRange.has(date)) { errors.push(`Row ${i + 2}: date ${date} is outside timetable range ${s.fromDate}..${s.toDate}`); outOfRange++; skipped++; return; }
         const label = (labelIdx >= 0 ? cells[labelIdx] : "") || "Block";
         const scope = ((scopeIdx >= 0 ? cells[scopeIdx] : "") || "all").toLowerCase();
         const targets = scope === "all" || scope === "*" || scope === ""
@@ -973,7 +977,14 @@ function Index() {
       });
       return { ...s, classes };
     });
-    const msg = `Applied ${applied} blocked cells.` + (skipped ? ` Skipped ${skipped} row(s).` : "") + (errors.length ? `\n\n${errors.slice(0, 5).join("\n")}` : "");
+    const extras: string[] = [];
+    if (outOfRange) extras.push(`${outOfRange} row(s) outside timetable date range (extend From/To to include them).`);
+    if (noPeriods) extras.push(`${noPeriods} row(s) had no valid periods.`);
+    const msg =
+      `Applied ${applied} blocked cells.` +
+      (skipped ? ` Skipped ${skipped} row(s).` : "") +
+      (extras.length ? `\n\n${extras.join("\n")}` : "") +
+      (errors.length ? `\n\n${errors.slice(0, 8).join("\n")}` : "");
     alert(msg);
   };
 
