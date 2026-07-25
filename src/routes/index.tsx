@@ -213,6 +213,23 @@ const isValidIso = (s: unknown): s is string =>
 const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
   const { allowedPeriods, ...rest } = course;
   const rawAllowedSlots = rest.allowedSlots ?? allowedPeriods ?? [];
+  const validSlotIdx = (idx: unknown) =>
+    typeof idx === "number" &&
+    idx >= 0 &&
+    idx < slots.length &&
+    !slots[idx].isBreak;
+  let allowedByWd: Record<number, number[]> | undefined;
+  const rawByWd = (rest as { allowedSlotsByWeekday?: unknown }).allowedSlotsByWeekday;
+  if (rawByWd && typeof rawByWd === "object") {
+    const out: Record<number, number[]> = {};
+    for (const [k, v] of Object.entries(rawByWd as Record<string, unknown>)) {
+      const wd = parseInt(k, 10);
+      if (wd < 0 || wd > 6 || Number.isNaN(wd)) continue;
+      if (!Array.isArray(v)) continue;
+      out[wd] = (v as unknown[]).filter(validSlotIdx) as number[];
+    }
+    if (Object.keys(out).length > 0) allowedByWd = out;
+  }
   return {
     ...rest,
     id: rest.id || `c${Date.now()}`,
@@ -223,6 +240,7 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
     weeklyPeriods: Math.max(0, Math.floor(rest.weeklyPeriods ?? 0)),
     allowedWeekdays: (rest.allowedWeekdays ?? []).filter((day) => day >= 0 && day <= 6),
     allowedSlots: rawAllowedSlots.filter((idx) => idx >= 0 && idx < slots.length && !slots[idx].isBreak),
+    allowedSlotsByWeekday: allowedByWd,
     fromDate: isValidIso(rest.fromDate) ? rest.fromDate : undefined,
     toDate: isValidIso(rest.toDate) ? rest.toDate : undefined,
   };
