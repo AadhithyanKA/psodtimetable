@@ -163,6 +163,7 @@ function Index() {
   const [bulkWeekdays, setBulkWeekdays] = useState<number[]>([]);
   const [bulkSlots, setBulkSlots] = useState<number[]>([]);
   const [bulkAllClasses, setBulkAllClasses] = useState(false);
+  const [autoFillReport, setAutoFillReport] = useState<string>("");
   const gridRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -473,6 +474,7 @@ function Index() {
         ...cls,
         grid: { ...cls.grid },
       }));
+      const workingDates = daysBetween(s.fromDate, s.toDate);
 
       let totalTarget = 0;
       let placedCount = 0;
@@ -542,9 +544,11 @@ function Index() {
 
       // Group dates by ISO week
       const weeks = new Map<string, string[]>();
-      dates.forEach((d) => {
+      workingDates.forEach((d) => {
         const k = weekKey(d);
-        (weeks.get(k) ?? weeks.set(k, []).get(k)!).push(d);
+        const week = weeks.get(k);
+        if (week) week.push(d);
+        else weeks.set(k, [d]);
       });
 
       // Round-robin across (class, course) to spread placements fairly
@@ -633,10 +637,12 @@ function Index() {
 
       // Diagnostic feedback so the user knows why nothing happened
       queueMicrotask(() => {
+        const mode = opts.strictRules ? "Fill by Rules" : opts.overwrite ? "Regenerate" : "Fill Empty";
+        setAutoFillReport(`${mode}: placed ${placedCount} of ${totalTarget} planned sessions.`);
         if (totalTarget === 0) {
           alert(
             opts.strictRules
-              ? "Nothing to auto-fill.\n\nAdd at least one course and make sure the date range includes allowed weekdays with non-break periods."
+              ? "Nothing to auto-fill.\n\nNo valid dates, courses, or non-break periods were found in the current timetable state. Your selected rules are accepted; please check the From/To date range and that the class has courses."
               : "Nothing to auto-fill.\n\nSet a weekly target (the /wk field) on at least one course. Currently every course has weekly = 0.",
           );
         } else if (placedCount === 0) {
@@ -1220,6 +1226,11 @@ function Index() {
                   Regen Rules
                 </button>
               </div>
+              {autoFillReport && (
+                <div className="mb-3 border border-[#0d0d0d]/30 bg-white px-3 py-2 text-[11px] font-bold text-[#2d2d2d]">
+                  {autoFillReport}
+                </div>
+              )}
 
               <div className="border-t border-dashed border-[#0d0d0d]/30 pt-3">
                 <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/60">
