@@ -1203,9 +1203,11 @@ function Index() {
                         className="truncate text-[10px] text-[#2d2d2d]/70"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
-                        {c.allowedWeekdays && c.allowedWeekdays.length > 0
-                          ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(" ")
-                          : "All days"}
+                        {c.fromDate || c.toDate
+                          ? `${c.fromDate ?? "start"} → ${c.toDate ?? "end"}`
+                          : c.allowedWeekdays && c.allowedWeekdays.length > 0
+                            ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(" ")
+                            : "All days"}
                         {" · "}
                         {c.allowedSlots && c.allowedSlots.length > 0
                           ? c.allowedSlots.map((i) => `P${periodNumberFor(i)}`).join(" ")
