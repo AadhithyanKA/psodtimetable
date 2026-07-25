@@ -1130,26 +1130,45 @@ function Index() {
                     No courses yet. Add one from the sidebar.
                   </div>
                 )}
-                {state.courses.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => pickTool({ kind: "course", courseId: c.id })}
-                    className="flex w-full items-center gap-3 border border-[#0d0d0d]/30 bg-white px-3 py-2 text-left transition-colors hover:border-[#0d0d0d]"
-                  >
-                    <span className="h-4 w-4 shrink-0" style={{ backgroundColor: c.color }} />
-                    <span className="min-w-0 flex-1">
-                      <span
-                        className="block truncate text-sm font-bold"
-                        style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
-                      >
-                        {c.name}
+                {state.courses.map((c) => {
+                  const allowed = courseAllowedOn(c, picker.date);
+                  const ruleLabel =
+                    c.allowedWeekdays && c.allowedWeekdays.length > 0
+                      ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(", ")
+                      : null;
+                  return (
+                    <button
+                      key={c.id}
+                      disabled={!allowed}
+                      onClick={() => pickTool({ kind: "course", courseId: c.id })}
+                      className={
+                        "flex w-full items-center gap-3 border px-3 py-2 text-left transition-colors " +
+                        (allowed
+                          ? "border-[#0d0d0d]/30 bg-white hover:border-[#0d0d0d]"
+                          : "cursor-not-allowed border-[#0d0d0d]/10 bg-[#f5f3ee] opacity-50")
+                      }
+                    >
+                      <span className="h-4 w-4 shrink-0" style={{ backgroundColor: c.color }} />
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className="block truncate text-sm font-bold"
+                          style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                        >
+                          {c.name}
+                        </span>
+                        <span className="block truncate text-[11px] text-[#2d2d2d]/60">
+                          {c.faculty}
+                          {ruleLabel && ` · ${ruleLabel} only`}
+                        </span>
                       </span>
-                      <span className="block truncate text-[11px] text-[#2d2d2d]/60">
-                        {c.faculty}
-                      </span>
-                    </span>
-                  </button>
-                ))}
+                      {!allowed && (
+                        <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-red-600">
+                          Unavailable
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
 
               <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/60">
