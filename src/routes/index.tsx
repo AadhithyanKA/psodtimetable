@@ -339,7 +339,6 @@ function Index() {
     state.slots[slotIdx]?.isBreak ? "Br" : `P${periodNumberFor(slotIdx)}`;
 
   useEffect(() => {
-    setHydrated(true);
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
@@ -350,6 +349,7 @@ function Index() {
         setState(defaultState());
       }
     } catch {}
+    setHydrated(true);
   }, []);
   useEffect(() => {
     if (hydrated) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
