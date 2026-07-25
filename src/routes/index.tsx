@@ -42,6 +42,10 @@ type Course = {
   allowedWeekdays?: number[];
   // Slot indices. undefined or empty = allowed in all periods.
   allowedSlots?: number[];
+  // Per-weekday period override. If a weekday key is present (even as [])
+  // it fully replaces `allowedSlots` for that weekday. Missing key = fall
+  // back to `allowedSlots`.
+  allowedSlotsByWeekday?: Record<number, number[]>;
   // Optional active date range for this course. Undefined = entire timetable range.
   fromDate?: string; // YYYY-MM-DD
   toDate?: string; // YYYY-MM-DD
