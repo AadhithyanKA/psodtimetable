@@ -617,22 +617,23 @@ function Index() {
         .filter(({ slot }) => !slot.isBreak)
         .map(({ idx }) => idx);
 
-      const startSlotsFor = (course: Course): number[] => {
-        const explicitSlots = (course.allowedSlots ?? [])
+      const startSlotsFor = (course: Course, date: string): number[] => {
+        const eff = effectiveAllowedSlots(course, date);
+        const explicitSlots = (eff ?? [])
           .filter((idx) => idx >= 0 && idx < s.slots.length && !s.slots[idx].isBreak)
           .sort((a, b) => a - b);
-        if (opts.strictRules) return explicitSlots.length > 0 ? explicitSlots : allNonBreakStarts;
-        return (explicitSlots.length > 0 ? explicitSlots : allNonBreakStarts).filter((idx) =>
-          courseAllowedSlot(course, idx),
+        if (opts.strictRules) return eff ? explicitSlots : allNonBreakStarts;
+        return (eff ? explicitSlots : allNonBreakStarts).filter((idx) =>
+          courseAllowedSlotOn(course, idx, date),
         );
       };
 
-      const spanFitsCourse = (course: Course, start: number): boolean => {
+      const spanFitsCourse = (course: Course, start: number, date: string): boolean => {
         for (let i = 0; i < cleanDurationSlots(course.durationSlots, s.slots); i++) {
           const idx = start + i;
           if (idx >= s.slots.length) return false;
           if (s.slots[idx].isBreak) return false;
-          if (!opts.strictRules && !courseAllowedSlot(course, idx)) return false;
+          if (!opts.strictRules && !courseAllowedSlotOn(course, idx, date)) return false;
         }
         return true;
       };
@@ -640,9 +641,9 @@ function Index() {
       // Per-class occupancy already lives in cls.grid (any non-empty cell blocks placement).
       const canPlace = (cls: ClassData, course: Course, date: string, start: number): boolean => {
         if (!courseAllowedOn(course, date)) return false;
-        const possibleStarts = startSlotsFor(course);
+        const possibleStarts = startSlotsFor(course, date);
         if (!possibleStarts.includes(start)) return false;
-        if (!spanFitsCourse(course, start)) return false;
+        if (!spanFitsCourse(course, start, date)) return false;
         for (let i = 0; i < cleanDurationSlots(course.durationSlots, s.slots); i++) {
           const idx = start + i;
           const key = `${date}-${idx}`;
@@ -664,14 +665,21 @@ function Index() {
 
       // Round-robin across (class, course) to spread placements fairly
       weeks.forEach((weekDates) => {
-        type Task = { cls: ClassData; course: Course; remaining: number; perDay: Record<string, number>; starts: number[] };
+        type Task = { cls: ClassData; course: Course; remaining: number; perDay: Record<string, number>; startsByDate: Record<string, number[]> };
         const tasks: Task[] = [];
         classes.forEach((cls) => {
           cls.courses.forEach((course) => {
-            const starts = startSlotsFor(course).filter((start) => spanFitsCourse(course, start));
+            const startsByDate: Record<string, number[]> = {};
+            let cap = 0;
+            weekDates.forEach((d) => {
+              if (!courseAllowedOn(course, d)) return;
+              const starts = startSlotsFor(course, d).filter((start) =>
+                spanFitsCourse(course, start, d),
+              );
+              startsByDate[d] = starts;
+              cap += starts.length;
+            });
             let target = course.weeklyPeriods ?? 0;
-            const availableDays = weekDates.filter((d) => courseAllowedOn(course, d)).length;
-            const cap = availableDays * starts.length;
             if (cap > 0) {
               // If /wk is 0 or missing, use every allowed weekday × allowed-period opportunity.
               // This keeps added courses eligible even when the weekly target field is untouched.
@@ -697,7 +705,7 @@ function Index() {
               });
             });
             const remaining = Math.max(0, target - placed);
-            if (remaining > 0) tasks.push({ cls, course, remaining, perDay, starts });
+            if (remaining > 0) tasks.push({ cls, course, remaining, perDay, startsByDate });
           });
         });
 
@@ -716,7 +724,8 @@ function Index() {
             // Score candidates: prefer days with fewest sessions of this course, then earliest slot
             let best: { date: string; slot: number; score: number } | null = null;
             for (const date of weekDates) {
-              for (const sIdx of task.starts) {
+              const starts = task.startsByDate[date] ?? [];
+              for (const sIdx of starts) {
                 if (!canPlace(task.cls, task.course, date, sIdx)) continue;
                 const score = (task.perDay[date] ?? 0) * 100 + sIdx;
                 if (!best || score < best.score) best = { date, slot: sIdx, score };
