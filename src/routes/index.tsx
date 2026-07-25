@@ -280,6 +280,37 @@ const normalizeStateSnapshot = (snapshot: SavedState): State => {
   };
 };
 
+const countCourseSessionsInDates = (
+  grid: Record<string, Cell>,
+  course: Course,
+  slots: Slot[],
+  dateList: string[],
+  onStart?: (date: string, slotIdx: number) => void,
+): number => {
+  const span = cleanDurationSlots(course.durationSlots, slots);
+  let count = 0;
+  dateList.forEach((date) => {
+    let slotIdx = 0;
+    while (slotIdx < slots.length) {
+      const cell = grid[`${date}-${slotIdx}`];
+      if (cell?.kind !== "course" || cell.courseId !== course.id) {
+        slotIdx++;
+        continue;
+      }
+      count++;
+      onStart?.(date, slotIdx);
+      let covered = 1;
+      while (covered < span && slotIdx + covered < slots.length) {
+        const next = grid[`${date}-${slotIdx + covered}`];
+        if (next?.kind !== "course" || next.courseId !== course.id) break;
+        covered++;
+      }
+      slotIdx += Math.max(1, covered);
+    }
+  });
+  return count;
+};
+
 type Tool =
   | { kind: "course"; courseId: string }
   | { kind: "break" }
@@ -308,7 +339,6 @@ function Index() {
     state.slots[slotIdx]?.isBreak ? "Br" : `P${periodNumberFor(slotIdx)}`;
 
   useEffect(() => {
-    setHydrated(true);
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
@@ -319,6 +349,7 @@ function Index() {
         setState(defaultState());
       }
     } catch {}
+    setHydrated(true);
   }, []);
   useEffect(() => {
     if (hydrated) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -593,7 +624,7 @@ function Index() {
 
   // ------------ Auto-populate ------------
   const autoPopulate = (opts: { overwrite: boolean; strictRules?: boolean }) => {
-    // ISO year+week key for grouping
+    // ISO year+week key for grouping weekly targets.
     const weekKey = (iso: string) => {
       const d = utcDateFromIso(iso);
       if (!d) return "invalid";
@@ -603,8 +634,8 @@ function Index() {
       const wk = 1 + Math.round(((t.getTime() - first.getTime()) / 86400000 - 3 + ((first.getUTCDay() + 6) % 7)) / 7);
       return `${t.getUTCFullYear()}-W${wk}`;
     };
+
     setState((s) => {
-      // Deep-clone classes (grids only need shallow copies of Cell objects)
       const classes: ClassData[] = s.classes.map((cls) => ({
         ...cls,
         grid: { ...cls.grid },
@@ -615,7 +646,6 @@ function Index() {
       let placedCount = 0;
       const unmet: string[] = [];
 
-      // Optionally wipe existing course cells (keep breaks + blocks + manual? overwrite=true wipes only course cells)
       if (opts.overwrite) {
         classes.forEach((cls) => {
           Object.keys(cls.grid).forEach((k) => {
@@ -625,14 +655,12 @@ function Index() {
         });
       }
 
-      // Global faculty occupancy
       const facultyBusy: Record<string, Set<string>> = {};
       classes.forEach((cls) => {
         Object.entries(cls.grid).forEach(([key, cell]) => {
-          if (cell.kind === "course") {
-            const course = cls.courses.find((c) => c.id === cell.courseId);
-            if (course) (facultyBusy[key] ??= new Set()).add(course.faculty);
-          }
+          if (cell.kind !== "course") return;
+          const course = cls.courses.find((c) => c.id === cell.courseId);
+          if (course) (facultyBusy[key] ??= new Set()).add(course.faculty);
         });
       });
 
@@ -643,13 +671,11 @@ function Index() {
 
       const startSlotsFor = (course: Course, date: string): number[] => {
         const eff = effectiveAllowedSlots(course, date);
-        const explicitSlots = (eff ?? [])
+        const candidates = eff ?? allNonBreakStarts;
+        return candidates
           .filter((idx) => idx >= 0 && idx < s.slots.length && !s.slots[idx].isBreak)
+          .filter((idx) => opts.strictRules || courseAllowedSlotOn(course, idx, date))
           .sort((a, b) => a - b);
-        if (opts.strictRules) return eff ? explicitSlots : allNonBreakStarts;
-        return (eff ? explicitSlots : allNonBreakStarts).filter((idx) =>
-          courseAllowedSlotOn(course, idx, date),
-        );
       };
 
       const spanFitsCourse = (course: Course, start: number, date: string): boolean => {
@@ -662,11 +688,9 @@ function Index() {
         return true;
       };
 
-      // Per-class occupancy already lives in cls.grid (any non-empty cell blocks placement).
       const canPlace = (cls: ClassData, course: Course, date: string, start: number): boolean => {
         if (!courseAllowedOn(course, date)) return false;
-        const possibleStarts = startSlotsFor(course, date);
-        if (!possibleStarts.includes(start)) return false;
+        if (!startSlotsFor(course, date).includes(start)) return false;
         if (!spanFitsCourse(course, start, date)) return false;
         for (let i = 0; i < cleanDurationSlots(course.durationSlots, s.slots); i++) {
           const idx = start + i;
@@ -678,159 +702,144 @@ function Index() {
         return true;
       };
 
-      // Group dates by ISO week
+      const countPlacedStarts = (cls: ClassData, course: Course, dateList: string[]) => {
+        let placed = 0;
+        const perDay: Record<string, number> = {};
+        const perSlot: Record<number, number> = {};
+        dateList.forEach((d) => {
+          perDay[d] = 0;
+        });
+        placed = countCourseSessionsInDates(cls.grid, course, s.slots, dateList, (d, i) => {
+          perDay[d] = (perDay[d] ?? 0) + 1;
+          perSlot[i] = (perSlot[i] ?? 0) + 1;
+        });
+        return { placed, perDay, perSlot };
+      };
+
+      type AutoTask = {
+        cls: ClassData;
+        course: Course;
+        remaining: number;
+        perDay: Record<string, number>;
+        perSlot: Record<number, number>;
+        startsByDate: Record<string, number[]>;
+        label: string;
+      };
+
+      const tasks: AutoTask[] = [];
+      const addTask = (cls: ClassData, course: Course, dateList: string[], desiredSessions: number, label: string) => {
+        const startsByDate: Record<string, number[]> = {};
+        let possibleStarts = 0;
+        dateList.forEach((d) => {
+          if (!courseAllowedOn(course, d)) return;
+          const starts = startSlotsFor(course, d).filter((start) => spanFitsCourse(course, start, d));
+          startsByDate[d] = starts;
+          possibleStarts += starts.length;
+        });
+        if (desiredSessions <= 0 && opts.strictRules && possibleStarts > 0) {
+          desiredSessions = possibleStarts;
+        }
+        if (desiredSessions <= 0) return;
+        const { placed, perDay, perSlot } = countPlacedStarts(cls, course, dateList);
+        const remaining = Math.max(0, desiredSessions - placed);
+        totalTarget += remaining;
+        if (remaining > 0) {
+          tasks.push({ cls, course, remaining, perDay, perSlot, startsByDate, label });
+        }
+      };
+
       const weeks = new Map<string, string[]>();
       workingDates.forEach((d) => {
-        const k = weekKey(d);
-        const week = weeks.get(k);
+        const key = weekKey(d);
+        const week = weeks.get(key);
         if (week) week.push(d);
-        else weeks.set(k, [d]);
+        else weeks.set(key, [d]);
       });
 
-      // Per-course global budget: when a course has an explicit totalSessions
-      // target, cap placements across all weeks by (totalSessions - already placed
-      // within workingDates). Key = `${classId}::${courseId}`.
-      const totalBudget: Record<string, number> = {};
       classes.forEach((cls) => {
         cls.courses.forEach((course) => {
-          if (!course.totalSessions || course.totalSessions <= 0) return;
-          let already = 0;
-          workingDates.forEach((d) => {
-            s.slots.forEach((_, i) => {
-              const cell = cls.grid[`${d}-${i}`];
-              if (cell?.kind === "course" && cell.courseId === course.id) {
-                const prev = cls.grid[`${d}-${i - 1}`];
-                if (!prev || prev.kind !== "course" || prev.courseId !== course.id) already++;
-              }
-            });
+          if (course.totalSessions && course.totalSessions > 0) {
+            addTask(cls, course, workingDates, course.totalSessions, "total");
+            return;
+          }
+          weeks.forEach((weekDates, key) => {
+            const desired = course.weeklyPeriods && course.weeklyPeriods > 0 ? course.weeklyPeriods : 0;
+            addTask(cls, course, weekDates, desired, key);
           });
-          totalBudget[`${cls.id}::${course.id}`] = Math.max(0, course.totalSessions - already);
         });
       });
 
-      // Round-robin across (class, course) to spread placements fairly
-      weeks.forEach((weekDates) => {
-        type Task = { cls: ClassData; course: Course; remaining: number; perDay: Record<string, number>; perSlot: Record<number, number>; startsByDate: Record<string, number[]> };
-        const tasks: Task[] = [];
-        classes.forEach((cls) => {
-          cls.courses.forEach((course) => {
-            const startsByDate: Record<string, number[]> = {};
-            let cap = 0;
-            weekDates.forEach((d) => {
-              if (!courseAllowedOn(course, d)) return;
-              const starts = startSlotsFor(course, d).filter((start) =>
-                spanFitsCourse(course, start, d),
-              );
-              startsByDate[d] = starts;
-              cap += starts.length;
-            });
-            let target = course.weeklyPeriods ?? 0;
-            if (cap > 0) {
-              // If /wk is 0 or missing, use every allowed weekday × allowed-period opportunity.
-              // This keeps added courses eligible even when the weekly target field is untouched.
-              target = target > 0 ? Math.min(target, cap) : cap;
-            }
-            const budgetKey = `${cls.id}::${course.id}`;
-            if (course.totalSessions && course.totalSessions > 0) {
-              // Total-sessions mode: budget across all weeks.
-              const remainingBudget = totalBudget[budgetKey] ?? 0;
-              target = Math.min(cap, remainingBudget);
-            }
-            if (target <= 0) return;
-            totalTarget += target;
-            // Count sessions already placed for this course in this week
-            let placed = 0;
-            const perDay: Record<string, number> = {};
-            const perSlot: Record<number, number> = {};
-            weekDates.forEach((d) => {
-              perDay[d] = 0;
-              s.slots.forEach((_, i) => {
-                const cell = cls.grid[`${d}-${i}`];
-                if (cell?.kind === "course" && cell.courseId === course.id) {
-                  // Only count the starting slot to avoid double-counting duration
-                  const prev = cls.grid[`${d}-${i - 1}`];
-                  if (!prev || prev.kind !== "course" || prev.courseId !== course.id) {
-                    placed++;
-                    perDay[d]++;
-                    perSlot[i] = (perSlot[i] ?? 0) + 1;
-                  }
-                }
-              });
-            });
-            const remaining = Math.max(0, target - placed);
-            if (remaining > 0) tasks.push({ cls, course, remaining, perDay, perSlot, startsByDate });
+      const availableCount = (task: AutoTask) => {
+        let count = 0;
+        Object.entries(task.startsByDate).forEach(([date, starts]) => {
+          starts.forEach((start) => {
+            if (canPlace(task.cls, task.course, date, start)) count++;
           });
+        });
+        return count;
+      };
+
+      const classDayLoad = (cls: ClassData, date: string) =>
+        s.slots.reduce((sum, _, i) => {
+          const cell = cls.grid[`${date}-${i}`];
+          return sum + (cell?.kind === "course" ? 1 : 0);
+        }, 0);
+
+      let progressed = true;
+      while (progressed) {
+        progressed = false;
+        const availability = new Map<AutoTask, number>();
+        tasks.forEach((task) => availability.set(task, availableCount(task)));
+        tasks.sort((a, b) => {
+          const aAvail = availability.get(a) ?? 0;
+          const bAvail = availability.get(b) ?? 0;
+          if (aAvail === 0 && bAvail > 0) return 1;
+          if (bAvail === 0 && aAvail > 0) return -1;
+          const aSlack = aAvail - a.remaining;
+          const bSlack = bAvail - b.remaining;
+          if (aSlack !== bSlack) return aSlack - bSlack;
+          if (b.remaining !== a.remaining) return b.remaining - a.remaining;
+          const aRules = (a.course.allowedWeekdays?.length || 7) + Object.values(a.course.allowedSlotsByWeekday ?? {}).flat().length + (a.course.allowedSlots?.length || s.slots.length);
+          const bRules = (b.course.allowedWeekdays?.length || 7) + Object.values(b.course.allowedSlotsByWeekday ?? {}).flat().length + (b.course.allowedSlots?.length || s.slots.length);
+          return aRules - bRules;
         });
 
-        let progressed = true;
-        while (progressed) {
-          progressed = false;
-          // Compute per-class day load once per pass so tasks avoid piling
-          // into days that are already busy for this class (spread across the
-          // week rather than filling Monday-first).
-          const classDayLoad = new Map<string, Record<string, number>>();
-          classes.forEach((cls) => {
-            const load: Record<string, number> = {};
-            weekDates.forEach((d) => {
-              let n = 0;
-              s.slots.forEach((_, i) => {
-                const cell = cls.grid[`${d}-${i}`];
-                if (cell?.kind === "course") n++;
-              });
-              load[d] = n;
-            });
-            classDayLoad.set(cls.id, load);
-          });
-          // Sort tasks: most-remaining first, then fewer allowed weekdays (tighter constraint)
-          tasks.sort((a, b) => {
-            if (b.remaining !== a.remaining) return b.remaining - a.remaining;
-            const aw = (a.course.allowedWeekdays?.length || 7) + (a.course.allowedSlots?.length || s.slots.length);
-            const bw = (b.course.allowedWeekdays?.length || 7) + (b.course.allowedSlots?.length || s.slots.length);
-            return aw - bw;
-          });
-          for (const task of tasks) {
-            if (task.remaining <= 0) continue;
-            // Score candidates: spread across days AND across periods so post-break
-            // slots also get used when the weekly target is smaller than opportunities.
-            let best: { date: string; slot: number; score: number } | null = null;
-            for (const date of weekDates) {
-              const starts = task.startsByDate[date] ?? [];
-              const dayLoad = classDayLoad.get(task.cls.id)?.[date] ?? 0;
-              for (const sIdx of starts) {
-                if (!canPlace(task.cls, task.course, date, sIdx)) continue;
-                const score =
-                  (task.perDay[date] ?? 0) * 1000000 +
-                  dayLoad * 10000 +
-                  (task.perSlot[sIdx] ?? 0) * 100 +
-                  sIdx;
-                if (!best || score < best.score) best = { date, slot: sIdx, score };
-              }
+        for (const task of tasks) {
+          if (task.remaining <= 0) continue;
+          let best: { date: string; slot: number; score: number } | null = null;
+          for (const [date, starts] of Object.entries(task.startsByDate)) {
+            for (const sIdx of starts) {
+              if (!canPlace(task.cls, task.course, date, sIdx)) continue;
+              const score =
+                (task.perDay[date] ?? 0) * 1000000 +
+                classDayLoad(task.cls, date) * 10000 +
+                (task.perSlot[sIdx] ?? 0) * 100 +
+                sIdx;
+              if (!best || score < best.score) best = { date, slot: sIdx, score };
             }
-            if (!best) continue;
-            // Place
-            const span = cleanDurationSlots(task.course.durationSlots, s.slots);
-            for (let i = 0; i < span; i++) {
-              const key = `${best.date}-${best.slot + i}`;
-              task.cls.grid[key] = { kind: "course", courseId: task.course.id };
-              (facultyBusy[key] ??= new Set()).add(task.course.faculty);
-            }
-            const clsLoad = classDayLoad.get(task.cls.id);
-            if (clsLoad) clsLoad[best.date] = (clsLoad[best.date] ?? 0) + span;
-            task.perDay[best.date] = (task.perDay[best.date] ?? 0) + 1;
-            task.perSlot[best.slot] = (task.perSlot[best.slot] ?? 0) + 1;
-            task.remaining--;
-            const bKey = `${task.cls.id}::${task.course.id}`;
-            if (bKey in totalBudget) {
-              totalBudget[bKey] = Math.max(0, (totalBudget[bKey] ?? 0) - 1);
-            }
-            placedCount++;
-            progressed = true;
           }
+          if (!best) continue;
+
+          const span = cleanDurationSlots(task.course.durationSlots, s.slots);
+          for (let i = 0; i < span; i++) {
+            const key = `${best.date}-${best.slot + i}`;
+            task.cls.grid[key] = { kind: "course", courseId: task.course.id };
+            (facultyBusy[key] ??= new Set()).add(task.course.faculty);
+          }
+          task.perDay[best.date] = (task.perDay[best.date] ?? 0) + 1;
+          task.perSlot[best.slot] = (task.perSlot[best.slot] ?? 0) + 1;
+          task.remaining--;
+          placedCount++;
+          progressed = true;
         }
-        tasks.forEach((t) => {
-          if (t.remaining > 0)
-            unmet.push(`${t.cls.name} · ${t.course.name}: ${t.remaining} left`);
-        });
+      }
+
+      tasks.forEach((task) => {
+        if (task.remaining <= 0) return;
+        const openNow = availableCount(task);
+        unmet.push(
+          `${task.cls.name} · ${task.course.name}: ${task.remaining} left${openNow === 0 ? " (no open rule slots)" : ` (${openNow} open rule slots)`}`,
+        );
       });
 
       const visibleCourseCounts = classes.map((cls) => {
@@ -1216,13 +1225,8 @@ function Index() {
     const weekCount = new Set(dates.map(isoWeekKey)).size;
     const countPlaced = (cls: ClassData) => {
       let n = 0;
-      dates.forEach((d) => {
-        state.slots.forEach((_, i) => {
-          const cell = cls.grid[`${d}-${i}`];
-          if (cell?.kind !== "course") return;
-          const prev = cls.grid[`${d}-${i - 1}`];
-          if (!prev || prev.kind !== "course" || prev.courseId !== cell.courseId) n++;
-        });
+      cls.courses.forEach((course) => {
+        n += countCourseSessionsInDates(cls.grid, course, state.slots, dates);
       });
       return n;
     };
@@ -1249,15 +1253,9 @@ function Index() {
   const coursePlacementCounts = useMemo(() => {
     const map = new Map<string, number>();
     if (!activeClass) return map;
-    dates.forEach((d) => {
-      state.slots.forEach((_, i) => {
-        const cell = activeClass.grid[`${d}-${i}`];
-        if (cell?.kind !== "course") return;
-        const prev = activeClass.grid[`${d}-${i - 1}`];
-        if (!prev || prev.kind !== "course" || prev.courseId !== cell.courseId) {
-          map.set(cell.courseId, (map.get(cell.courseId) ?? 0) + 1);
-        }
-      });
+    activeClass.courses.forEach((course) => {
+      const count = countCourseSessionsInDates(activeClass.grid, course, state.slots, dates);
+      if (count > 0) map.set(course.id, count);
     });
     return map;
   }, [activeClass, dates, state.slots]);
@@ -2148,16 +2146,7 @@ function Index() {
                   // Count placed sessions of this course in the current date range
                   let placedForCourse = 0;
                   if (activeClass) {
-                    dates.forEach((d) => {
-                      state.slots.forEach((_, i) => {
-                        const cell = activeClass.grid[`${d}-${i}`];
-                        if (cell?.kind === "course" && cell.courseId === c.id) {
-                          const prev = activeClass.grid[`${d}-${i - 1}`];
-                          if (!prev || prev.kind !== "course" || prev.courseId !== c.id)
-                            placedForCourse++;
-                        }
-                      });
-                    });
+                    placedForCourse = countCourseSessionsInDates(activeClass.grid, c, state.slots, dates);
                   }
                   const dateRange = c.fromDate || c.toDate ? `${c.fromDate ?? "start"} → ${c.toDate ?? "end"}` : null;
                   const ruleLabel =
