@@ -182,6 +182,8 @@ const cleanDurationSlots = (value: unknown, slots: Slot[]): number => {
   const max = Math.max(1, nonBreakCount(slots));
   return whole >= 1 && whole <= max ? whole : 1;
 };
+const isValidIso = (s: unknown): s is string =>
+  typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
   const { allowedPeriods, ...rest } = course;
   const rawAllowedSlots = rest.allowedSlots ?? allowedPeriods ?? [];
@@ -195,6 +197,8 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
     weeklyPeriods: Math.max(0, Math.floor(rest.weeklyPeriods ?? 0)),
     allowedWeekdays: (rest.allowedWeekdays ?? []).filter((day) => day >= 0 && day <= 6),
     allowedSlots: rawAllowedSlots.filter((idx) => idx >= 0 && idx < slots.length && !slots[idx].isBreak),
+    fromDate: isValidIso(rest.fromDate) ? rest.fromDate : undefined,
+    toDate: isValidIso(rest.toDate) ? rest.toDate : undefined,
   };
 };
 const normalizeStateSnapshot = (snapshot: SavedState): State => {
