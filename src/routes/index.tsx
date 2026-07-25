@@ -769,12 +769,9 @@ function Index() {
                     </button>
                   </div>
                 )}
-                <button
-                onClick={addSlot}
-                className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
-              >
-                + Add time slot
-                </button>
+                <span className="text-xs text-slate-500">
+                  {state.slots.length} × {state.slotMinutes} min slots
+                </span>
               </div>
             </div>
 
@@ -791,21 +788,7 @@ function Index() {
                         className="border border-slate-200 bg-slate-100 p-1 text-xs font-semibold text-slate-600"
                         style={{ minWidth: 120 }}
                       >
-                        <div className="flex items-center gap-1">
-                          <input
-                            value={slot}
-                            onChange={(e) => updateSlot(i, e.target.value)}
-                            className="w-full rounded bg-white px-1 py-1 text-xs"
-                          />
-                          {state.slots.length > 1 && (
-                            <button
-                              onClick={() => removeSlot(i)}
-                              className="rounded px-1 text-xs text-slate-400 hover:text-red-600"
-                            >
-                              ×
-                            </button>
-                          )}
-                        </div>
+                        <div className="whitespace-nowrap px-1 py-1 text-center">{slot}</div>
                       </th>
                     ))}
                   </tr>
