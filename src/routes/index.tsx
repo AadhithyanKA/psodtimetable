@@ -36,6 +36,8 @@ type Course = {
   faculty: string;
   color: string;
   durationSlots: number;
+  // Target number of sessions per week (used by auto-fill). 0 = don't auto-fill.
+  weeklyPeriods?: number;
   // 0=Sun..6=Sat. undefined or empty = allowed on all days.
   allowedWeekdays?: number[];
   // Slot indices. undefined or empty = allowed in all periods.
