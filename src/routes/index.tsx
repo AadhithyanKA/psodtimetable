@@ -38,14 +38,15 @@ type Course = {
   durationSlots: number;
   // 0=Sun..6=Sat. undefined or empty = allowed on all days.
   allowedWeekdays?: number[];
+  // Slot indices. undefined or empty = allowed in all periods.
+  allowedSlots?: number[];
 };
-type ClassData = { id: string; name: string; grid: Record<string, Cell> };
+type ClassData = { id: string; name: string; grid: Record<string, Cell>; courses: Course[] };
 type Slot = { start: string; end: string; isBreak?: boolean }; // 24h "HH:MM"
 type State = {
   fromDate: string; // YYYY-MM-DD
   toDate: string;
   slots: Slot[];
-  courses: Course[];
   classes: ClassData[];
 };
 
@@ -53,7 +54,7 @@ const COLORS = [
   "#fdba74", "#fcd34d", "#86efac", "#67e8f9",
   "#93c5fd", "#c4b5fd", "#f9a8d4", "#a7f3d0",
 ];
-const STORAGE_KEY = "timetable-maker-v4";
+const STORAGE_KEY = "timetable-maker-v5";
 
 const isoToday = () => new Date().toISOString().slice(0, 10);
 const addDays = (iso: string, n: number) => {
