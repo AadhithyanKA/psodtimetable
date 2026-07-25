@@ -628,7 +628,10 @@ function Index() {
                             )
                           }
                         />
-                        <span>{slot}</span>
+                        <span>
+                          {slotLabel(slot)}
+                          {slot.isBreak && <span className="ml-1 text-amber-700">(break)</span>}
+                        </span>
                       </label>
                     );
                   })}
@@ -731,7 +734,7 @@ function Index() {
                   </div>
                 )}
                 <span className="text-xs text-slate-500">
-                  {state.slots.length} × {state.slotMinutes} min slots
+                  {state.slots.length} slots
                 </span>
               </div>
             </div>
@@ -746,10 +749,15 @@ function Index() {
                     {state.slots.map((slot, i) => (
                       <th
                         key={i}
-                        className="border border-slate-200 bg-slate-100 p-1 text-xs font-semibold text-slate-600"
+                        className={`border border-slate-200 p-1 text-xs font-semibold text-slate-600 ${
+                          slot.isBreak ? "bg-amber-100" : "bg-slate-100"
+                        }`}
                         style={{ minWidth: 120 }}
                       >
-                        <div className="whitespace-nowrap px-1 py-1 text-center">{slot}</div>
+                        <div className="whitespace-nowrap px-1 py-1 text-center">
+                          {slotLabel(slot)}
+                          {slot.isBreak && <div className="text-[10px] text-amber-700">Break</div>}
+                        </div>
                       </th>
                     ))}
                   </tr>
@@ -813,7 +821,7 @@ function Index() {
             <div className="mb-3">
               <div className="text-xs uppercase tracking-wide text-slate-500">Assign slot</div>
               <div className="text-sm font-semibold text-slate-800">
-                {dayLabel(picker.date).weekday} {dayLabel(picker.date).date} · {state.slots[picker.slotIdx]}
+                {dayLabel(picker.date).weekday} {dayLabel(picker.date).date} · {state.slots[picker.slotIdx] ? slotLabel(state.slots[picker.slotIdx]) : ""}
               </div>
               <div className="text-xs text-slate-500">
                 Tip: after picking, drag across cells to fill more with the same choice.
