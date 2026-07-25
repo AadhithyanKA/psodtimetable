@@ -2146,16 +2146,7 @@ function Index() {
                   // Count placed sessions of this course in the current date range
                   let placedForCourse = 0;
                   if (activeClass) {
-                    dates.forEach((d) => {
-                      state.slots.forEach((_, i) => {
-                        const cell = activeClass.grid[`${d}-${i}`];
-                        if (cell?.kind === "course" && cell.courseId === c.id) {
-                          const prev = activeClass.grid[`${d}-${i - 1}`];
-                          if (!prev || prev.kind !== "course" || prev.courseId !== c.id)
-                            placedForCourse++;
-                        }
-                      });
-                    });
+                    placedForCourse = countCourseSessionsInDates(activeClass.grid, c, state.slots, dates);
                   }
                   const dateRange = c.fromDate || c.toDate ? `${c.fromDate ?? "start"} → ${c.toDate ?? "end"}` : null;
                   const ruleLabel =
