@@ -106,7 +106,8 @@ function Index() {
   const [activeClassId, setActiveClassId] = useState("k1");
   const [hydrated, setHydrated] = useState(false);
   const [picker, setPicker] = useState<{ date: string; slotIdx: number } | null>(null);
-  const [dragging, setDragging] = useState<Tool | null>(null);
+  const [armedTool, setArmedTool] = useState<Tool | null>(null);
+  const [isPainting, setIsPainting] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -125,7 +126,7 @@ function Index() {
   }, [state, hydrated]);
 
   useEffect(() => {
-    const up = () => setDragging(null);
+    const up = () => setIsPainting(false);
     window.addEventListener("mouseup", up);
     return () => window.removeEventListener("mouseup", up);
   }, []);
@@ -172,26 +173,39 @@ function Index() {
     }));
   };
 
-  const onCellClick = (date: string, slotIdx: number) => {
-    setPicker({ date, slotIdx });
-  };
   const onCellMouseDown = (date: string, slotIdx: number, e: React.MouseEvent) => {
-    // Shift-drag or right-click drag would be nice, but keep simple:
-    // If popover open elsewhere, close. Left click begins picker; drag begins only after picking.
-    // Here we support drag AFTER a tool has been chosen via picker (dragging state set).
-    if (dragging) {
+    // Alt + right-click erases immediately
+    if (e.button === 2 && e.altKey) {
       e.preventDefault();
-      applyTool(date, slotIdx, dragging);
+      applyTool(date, slotIdx, { kind: "erase" });
+      return;
+    }
+    // Right-click (no alt) opens picker to change tool
+    if (e.button === 2) {
+      e.preventDefault();
+      setPicker({ date, slotIdx });
+      return;
+    }
+    if (e.button !== 0) return;
+    if (armedTool) {
+      e.preventDefault();
+      applyTool(date, slotIdx, armedTool);
+      setIsPainting(true);
+    } else {
+      setPicker({ date, slotIdx });
     }
   };
-  const onCellEnter = (date: string, slotIdx: number) => {
-    if (dragging) applyTool(date, slotIdx, dragging);
+  const onCellEnter = (date: string, slotIdx: number, e: React.MouseEvent) => {
+    // Only paint while a mouse button is actually held down
+    if (isPainting && armedTool && (e.buttons & 1) === 1) {
+      applyTool(date, slotIdx, armedTool);
+    }
   };
 
   const pickTool = (tool: Tool) => {
     if (!picker) return;
     applyTool(picker.date, picker.slotIdx, tool);
-    setDragging(tool); // enable drag-to-paint on subsequent cells
+    setArmedTool(tool); // arm for subsequent click / click-drag
     setPicker(null);
   };
 
@@ -333,13 +347,13 @@ function Index() {
   const hasConflicts = conflicts.size > 0;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900" onMouseLeave={() => setDragging(null)}>
+    <div className="min-h-screen bg-slate-50 text-slate-900" onMouseLeave={() => setIsPainting(false)}>
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-3 px-6 py-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Timetable Maker</h1>
             <p className="text-sm text-slate-500">
-              Pick a date range, click a slot to assign, then drag to fill more.
+              Click a slot to pick a course, then click or click-drag to paint. Alt + right-click to erase. Right-click to change tool.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -485,12 +499,42 @@ function Index() {
           <div className="rounded-lg border border-slate-200 bg-white p-4">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-lg font-semibold">{activeClass?.name}</h2>
-              <button
+              <div className="flex items-center gap-2">
+                {armedTool && (
+                  <div className="flex items-center gap-2 rounded border border-slate-300 bg-slate-50 px-2 py-1 text-xs">
+                    <span className="text-slate-500">Tool:</span>
+                    {armedTool.kind === "course" ? (
+                      <span className="flex items-center gap-1">
+                        <span
+                          className="inline-block h-3 w-3 rounded"
+                          style={{
+                            backgroundColor:
+                              state.courses.find((c) => c.id === armedTool.courseId)?.color ?? "#ddd",
+                          }}
+                        />
+                        <span className="font-medium">
+                          {state.courses.find((c) => c.id === armedTool.courseId)?.name ?? "?"}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="font-medium capitalize">{armedTool.kind}</span>
+                    )}
+                    <button
+                      onClick={() => setArmedTool(null)}
+                      className="rounded px-1 text-slate-400 hover:text-red-600"
+                      title="Clear tool"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
+                <button
                 onClick={addSlot}
                 className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
               >
                 + Add time slot
-              </button>
+                </button>
+              </div>
             </div>
 
             <div className="overflow-x-auto" ref={gridRef}>
@@ -543,9 +587,9 @@ function Index() {
                           return (
                             <td
                               key={i}
-                              onClick={() => onCellClick(date, i)}
                               onMouseDown={(e) => onCellMouseDown(date, i, e)}
-                              onMouseEnter={() => onCellEnter(date, i)}
+                              onMouseEnter={(e) => onCellEnter(date, i, e)}
+                              onContextMenu={(e) => e.preventDefault()}
                               className={`cursor-pointer border p-2 text-xs align-middle ${
                                 isConflict ? "border-red-500 ring-2 ring-red-400" : "border-slate-200"
                               }`}
