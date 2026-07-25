@@ -1939,6 +1939,43 @@ function Index() {
                 <div>
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                      Active date range
+                    </span>
+                    <button
+                      onClick={() => updateCourse(course.id, { fromDate: undefined, toDate: undefined })}
+                      className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                    >
+                      All dates
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60">
+                      <span>From</span>
+                      <input
+                        type="date"
+                        value={course.fromDate ?? ""}
+                        onChange={(e) => updateCourse(course.id, { fromDate: e.target.value || undefined })}
+                        className="border border-[#0d0d0d]/20 bg-white px-2 py-1 text-xs outline-none focus:border-[#0d0d0d]"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60">
+                      <span>To</span>
+                      <input
+                        type="date"
+                        value={course.toDate ?? ""}
+                        onChange={(e) => updateCourse(course.id, { toDate: e.target.value || undefined })}
+                        className="border border-[#0d0d0d]/20 bg-white px-2 py-1 text-xs outline-none focus:border-[#0d0d0d]"
+                      />
+                    </label>
+                  </div>
+                  <p className="mt-1 text-[10px] text-[#2d2d2d]/50">
+                    Restrict this course to a specific date window. Leave blank to use the full timetable range.
+                  </p>
+                </div>
+
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
                       Available weekdays
                     </span>
                     <button
