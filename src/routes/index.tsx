@@ -59,7 +59,6 @@ const daysBetween = (from: string, to: string): string[] => {
   const end = new Date(to + "T00:00:00");
   if (end < start) return out;
   const diff = Math.round((end.getTime() - start.getTime()) / 86400000);
-  if (diff > 60) return out; // safety cap
   for (let i = 0; i <= diff; i++) out.push(addDays(from, i));
   return out;
 };
