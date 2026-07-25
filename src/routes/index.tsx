@@ -360,32 +360,6 @@ function Index() {
       }),
     }));
 
-  const addSlot = () =>
-    setState((s) => ({ ...s, slots: [...s.slots, `Slot ${s.slots.length + 1}`] }));
-  const removeSlot = (i: number) =>
-    setState((s) => {
-      const slots = s.slots.filter((_, idx) => idx !== i);
-      const classes = s.classes.map((cls) => {
-        const grid: Record<string, Cell> = {};
-        Object.entries(cls.grid).forEach(([k, v]) => {
-          const m = k.match(/^(.+)-(\d+)$/);
-          if (!m) return;
-          const oldIdx = parseInt(m[2], 10);
-          if (oldIdx === i) return;
-          const newIdx = oldIdx > i ? oldIdx - 1 : oldIdx;
-          grid[`${m[1]}-${newIdx}`] = v;
-        });
-        return { ...cls, grid };
-      });
-      return { ...s, slots, classes };
-    });
-  const updateSlot = (i: number, val: string) =>
-    setState((s) => {
-      const slots = [...s.slots];
-      slots[i] = val;
-      return { ...s, slots };
-    });
-
   // Export
   const buildSheet = (cls: ClassData) => {
     const rows: string[][] = [];
