@@ -681,7 +681,7 @@ function Index() {
 
       // Round-robin across (class, course) to spread placements fairly
       weeks.forEach((weekDates) => {
-        type Task = { cls: ClassData; course: Course; remaining: number; perDay: Record<string, number>; startsByDate: Record<string, number[]> };
+        type Task = { cls: ClassData; course: Course; remaining: number; perDay: Record<string, number>; perSlot: Record<number, number>; startsByDate: Record<string, number[]> };
         const tasks: Task[] = [];
         classes.forEach((cls) => {
           cls.courses.forEach((course) => {
@@ -706,6 +706,7 @@ function Index() {
             // Count sessions already placed for this course in this week
             let placed = 0;
             const perDay: Record<string, number> = {};
+            const perSlot: Record<number, number> = {};
             weekDates.forEach((d) => {
               perDay[d] = 0;
               s.slots.forEach((_, i) => {
@@ -716,12 +717,13 @@ function Index() {
                   if (!prev || prev.kind !== "course" || prev.courseId !== course.id) {
                     placed++;
                     perDay[d]++;
+                    perSlot[i] = (perSlot[i] ?? 0) + 1;
                   }
                 }
               });
             });
             const remaining = Math.max(0, target - placed);
-            if (remaining > 0) tasks.push({ cls, course, remaining, perDay, startsByDate });
+            if (remaining > 0) tasks.push({ cls, course, remaining, perDay, perSlot, startsByDate });
           });
         });
 
@@ -737,13 +739,17 @@ function Index() {
           });
           for (const task of tasks) {
             if (task.remaining <= 0) continue;
-            // Score candidates: prefer days with fewest sessions of this course, then earliest slot
+            // Score candidates: spread across days AND across periods so post-break
+            // slots also get used when the weekly target is smaller than opportunities.
             let best: { date: string; slot: number; score: number } | null = null;
             for (const date of weekDates) {
               const starts = task.startsByDate[date] ?? [];
               for (const sIdx of starts) {
                 if (!canPlace(task.cls, task.course, date, sIdx)) continue;
-                const score = (task.perDay[date] ?? 0) * 100 + sIdx;
+                const score =
+                  (task.perDay[date] ?? 0) * 10000 +
+                  (task.perSlot[sIdx] ?? 0) * 100 +
+                  sIdx;
                 if (!best || score < best.score) best = { date, slot: sIdx, score };
               }
             }
@@ -756,6 +762,7 @@ function Index() {
               (facultyBusy[key] ??= new Set()).add(task.course.faculty);
             }
             task.perDay[best.date] = (task.perDay[best.date] ?? 0) + 1;
+            task.perSlot[best.slot] = (task.perSlot[best.slot] ?? 0) + 1;
             task.remaining--;
             placedCount++;
             progressed = true;
@@ -1122,6 +1129,48 @@ function Index() {
       }, 0);
     }, 0);
   }, [activeClass, dates, state.slots]);
+
+  // Planned vs placed sessions for the current date range. A "session" is one
+  // course start (multi-slot durations count as one). Planned = sum of each
+  // course's weeklyPeriods × number of ISO weeks covered by the range.
+  const sessionStats = useMemo(() => {
+    const isoWeekKey = (iso: string) => {
+      const d = utcDateFromIso(iso);
+      if (!d) return "invalid";
+      const day = (d.getUTCDay() + 6) % 7;
+      const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day + 3));
+      const first = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+      const wk = 1 + Math.round(((t.getTime() - first.getTime()) / 86400000 - 3 + ((first.getUTCDay() + 6) % 7)) / 7);
+      return `${t.getUTCFullYear()}-W${wk}`;
+    };
+    const weekCount = new Set(dates.map(isoWeekKey)).size;
+    const countPlaced = (cls: ClassData) => {
+      let n = 0;
+      dates.forEach((d) => {
+        state.slots.forEach((_, i) => {
+          const cell = cls.grid[`${d}-${i}`];
+          if (cell?.kind !== "course") return;
+          const prev = cls.grid[`${d}-${i - 1}`];
+          if (!prev || prev.kind !== "course" || prev.courseId !== cell.courseId) n++;
+        });
+      });
+      return n;
+    };
+    const planFor = (cls: ClassData) =>
+      cls.courses.reduce((sum, c) => sum + Math.max(0, c.weeklyPeriods ?? 0), 0) * weekCount;
+    const activePlanned = activeClass ? planFor(activeClass) : 0;
+    const activePlaced = activeClass ? countPlaced(activeClass) : 0;
+    const totalPlanned = state.classes.reduce((s, c) => s + planFor(c), 0);
+    const totalPlaced = state.classes.reduce((s, c) => s + countPlaced(c), 0);
+    return {
+      activePlanned,
+      activePlaced,
+      activeRemaining: Math.max(0, activePlanned - activePlaced),
+      totalPlanned,
+      totalPlaced,
+      totalRemaining: Math.max(0, totalPlanned - totalPlaced),
+    };
+  }, [activeClass, dates, state.slots, state.classes]);
 
   return (
     <div
@@ -1712,6 +1761,40 @@ function Index() {
               style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
             >
               {dates.length} day{dates.length === 1 ? "" : "s"} · {state.slots.length} slots · {activeVisibleCourseSlots} filled
+            </span>
+            <span className="text-[#2d2d2d]/20">·</span>
+            <span
+              className="flex flex-wrap items-center gap-2 text-[11px]"
+              style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+            >
+              <span
+                className={
+                  "border-2 px-2 py-0.5 font-bold " +
+                  (sessionStats.activeRemaining === 0
+                    ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                    : "border-[#0d0d0d] bg-white text-[#0d0d0d]")
+                }
+                title="This class · placed / planned (remaining)"
+              >
+                {activeClass?.name ?? "Class"}: {sessionStats.activePlaced}/{sessionStats.activePlanned}
+                <span className="ml-1 text-[#2d2d2d]/60">
+                  · {sessionStats.activeRemaining} left
+                </span>
+              </span>
+              <span
+                className={
+                  "border-2 px-2 py-0.5 font-bold " +
+                  (sessionStats.totalRemaining === 0
+                    ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                    : "border-[#0d0d0d]/60 bg-[#f5f3ee] text-[#0d0d0d]")
+                }
+                title="All classes · placed / planned (remaining)"
+              >
+                All: {sessionStats.totalPlaced}/{sessionStats.totalPlanned}
+                <span className="ml-1 text-[#2d2d2d]/60">
+                  · {sessionStats.totalRemaining} left
+                </span>
+              </span>
             </span>
             {armedTool && (
               <div className="ml-auto flex items-center gap-2 border-2 border-[#0d0d0d] bg-white px-2 py-1">
