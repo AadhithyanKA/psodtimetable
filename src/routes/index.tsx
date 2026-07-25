@@ -38,14 +38,15 @@ type Course = {
   durationSlots: number;
   // 0=Sun..6=Sat. undefined or empty = allowed on all days.
   allowedWeekdays?: number[];
+  // Slot indices. undefined or empty = allowed in all periods.
+  allowedSlots?: number[];
 };
-type ClassData = { id: string; name: string; grid: Record<string, Cell> };
+type ClassData = { id: string; name: string; grid: Record<string, Cell>; courses: Course[] };
 type Slot = { start: string; end: string; isBreak?: boolean }; // 24h "HH:MM"
 type State = {
   fromDate: string; // YYYY-MM-DD
   toDate: string;
   slots: Slot[];
-  courses: Course[];
   classes: ClassData[];
 };
 
@@ -53,7 +54,7 @@ const COLORS = [
   "#fdba74", "#fcd34d", "#86efac", "#67e8f9",
   "#93c5fd", "#c4b5fd", "#f9a8d4", "#a7f3d0",
 ];
-const STORAGE_KEY = "timetable-maker-v4";
+const STORAGE_KEY = "timetable-maker-v5";
 
 const isoToday = () => new Date().toISOString().slice(0, 10);
 const addDays = (iso: string, n: number) => {
@@ -86,6 +87,11 @@ const courseAllowedOn = (course: Course, iso: string): boolean => {
   const rule = course.allowedWeekdays;
   if (!rule || rule.length === 0) return true;
   return rule.includes(weekdayOf(iso));
+};
+const courseAllowedSlot = (course: Course, slotIdx: number): boolean => {
+  const rule = course.allowedSlots;
+  if (!rule || rule.length === 0) return true;
+  return rule.includes(slotIdx);
 };
 
 const parseHM = (s: string): number => {
@@ -120,20 +126,20 @@ const DEFAULT_SLOTS: Slot[] = [
 function defaultState(): State {
   const from = isoToday();
   const to = addDays(from, 4);
-  const courses: Course[] = [
+  const seedCourses: Course[] = [
     { id: "c1", name: "Mathematics", faculty: "Dr. Smith", color: COLORS[0], durationSlots: 1 },
     { id: "c2", name: "Physics", faculty: "Dr. Jones", color: COLORS[2], durationSlots: 1 },
     { id: "c3", name: "Chemistry", faculty: "Dr. Patel", color: COLORS[4], durationSlots: 1 },
   ];
   const mkGrid = (): Record<string, Cell> => ({});
+  const cloneCourses = (): Course[] => seedCourses.map((c) => ({ ...c }));
   return {
     fromDate: from,
     toDate: to,
     slots: DEFAULT_SLOTS,
-    courses,
     classes: [
-      { id: "k1", name: "Class A", grid: mkGrid() },
-      { id: "k2", name: "Class B", grid: mkGrid() },
+      { id: "k1", name: "Class A", grid: mkGrid(), courses: cloneCourses() },
+      { id: "k2", name: "Class B", grid: mkGrid(), courses: cloneCourses() },
     ],
   };
 }
@@ -151,6 +157,7 @@ function Index() {
   const [picker, setPicker] = useState<{ date: string; slotIdx: number } | null>(null);
   const [armedTool, setArmedTool] = useState<Tool | null>(null);
   const [isPainting, setIsPainting] = useState(false);
+  const [rulesFor, setRulesFor] = useState<string | null>(null); // courseId in activeClass
   const [bulkWeekdays, setBulkWeekdays] = useState<number[]>([]);
   const [bulkSlots, setBulkSlots] = useState<number[]>([]);
   const [bulkAllClasses, setBulkAllClasses] = useState(false);
@@ -163,12 +170,21 @@ function Index() {
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<State>;
         const base = defaultState();
+        // Migrate v4 → v5: top-level `courses` moved into each class
+        const legacyCourses: Course[] | undefined = (parsed as { courses?: Course[] }).courses;
+        const migratedClasses: ClassData[] = (parsed.classes ?? base.classes).map(
+          (cls) => ({
+            ...cls,
+            courses:
+              (cls as ClassData).courses ??
+              (legacyCourses ? legacyCourses.map((c) => ({ ...c })) : []),
+          }),
+        );
         const merged: State = {
           ...base,
           ...parsed,
           slots: parsed.slots ?? base.slots,
-          courses: parsed.courses ?? base.courses,
-          classes: parsed.classes ?? base.classes,
+          classes: migratedClasses,
         };
         setState(merged);
         setActiveClassId(merged.classes[0]?.id ?? "");
@@ -235,11 +251,13 @@ function Index() {
         state.classes.forEach((cls) => {
           const cell = cls.grid[key];
           if (cell?.kind === "course") {
-            const course = state.courses.find((c) => c.id === cell.courseId);
+            const course = cls.courses.find((c) => c.id === cell.courseId);
             if (!course) return;
             (facultyToClass[course.faculty] ??= []).push(cls.id);
-            // Rule violation: course placed on a weekday its faculty doesn't work
-            if (!courseAllowedOn(course, date)) set.add(`${cls.id}:${key}`);
+            // Rule violation: course placed on a weekday or period it isn't allowed
+            if (!courseAllowedOn(course, date) || !courseAllowedSlot(course, i)) {
+              set.add(`${cls.id}:${key}`);
+            }
           }
         });
         Object.values(facultyToClass).forEach((clsIds) => {
@@ -251,9 +269,10 @@ function Index() {
   }, [state, dates]);
 
   const applyTool = (date: string, slotIdx: number, tool: Tool) => {
-    // Enforce course weekday rules — silently skip disallowed dates
+    // Enforce course rules — silently skip disallowed dates
     if (tool.kind === "course") {
-      const course = state.courses.find((c) => c.id === tool.courseId);
+      const active = state.classes.find((c) => c.id === activeClassId);
+      const course = active?.courses.find((c) => c.id === tool.courseId);
       if (course && !courseAllowedOn(course, date)) return;
     }
     setState((s) => ({
@@ -264,13 +283,17 @@ function Index() {
         // How many slots does this tool span?
         let span = 1;
         if (tool.kind === "course") {
-          const course = s.courses.find((c) => c.id === tool.courseId);
+          const course = cls.courses.find((c) => c.id === tool.courseId);
           span = Math.max(1, course?.durationSlots ?? 1);
         }
         for (let k = 0; k < span; k++) {
           const idx = slotIdx + k;
           if (idx >= s.slots.length) break;
           if (s.slots[idx].isBreak) continue; // never write into break slots
+          if (tool.kind === "course") {
+            const course = cls.courses.find((c) => c.id === tool.courseId);
+            if (course && !courseAllowedSlot(course, idx)) continue;
+          }
           const key = `${date}-${idx}`;
           if (tool.kind === "erase") delete grid[key];
           else if (tool.kind === "break") grid[key] = { kind: "break", label: "Break" };
@@ -361,7 +384,7 @@ function Index() {
         ...s,
         classes: [
           ...s.classes,
-          { id, name: `Class ${String.fromCharCode(65 + s.classes.length)}`, grid: {} },
+          { id, name: `Class ${String.fromCharCode(65 + s.classes.length)}`, grid: {}, courses: [] },
         ],
       };
     });
@@ -377,33 +400,49 @@ function Index() {
   const renameClass = (id: string, name: string) =>
     setState((s) => ({ ...s, classes: s.classes.map((c) => (c.id === id ? { ...c, name } : c)) }));
 
+  // Courses are per-class — all edits scope to the active class
   const addCourse = () =>
     setState((s) => ({
       ...s,
-      courses: [
-        ...s.courses,
-        {
-          id: `c${Date.now()}`,
-          name: "New Course",
-          faculty: "Faculty",
-          color: COLORS[s.courses.length % COLORS.length],
-          durationSlots: 1,
-        },
-      ],
+      classes: s.classes.map((cls) => {
+        if (cls.id !== activeClassId) return cls;
+        return {
+          ...cls,
+          courses: [
+            ...cls.courses,
+            {
+              id: `c${Date.now()}`,
+              name: "New Course",
+              faculty: "Faculty",
+              color: COLORS[cls.courses.length % COLORS.length],
+              durationSlots: 1,
+            },
+          ],
+        };
+      }),
     }));
   const updateCourse = (id: string, patch: Partial<Course>) =>
-    setState((s) => ({ ...s, courses: s.courses.map((c) => (c.id === id ? { ...c, ...patch } : c)) }));
+    setState((s) => ({
+      ...s,
+      classes: s.classes.map((cls) => {
+        if (cls.id !== activeClassId) return cls;
+        return {
+          ...cls,
+          courses: cls.courses.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+        };
+      }),
+    }));
   const removeCourse = (id: string) =>
     setState((s) => ({
       ...s,
-      courses: s.courses.filter((c) => c.id !== id),
       classes: s.classes.map((cls) => {
+        if (cls.id !== activeClassId) return cls;
         const grid = { ...cls.grid };
         Object.keys(grid).forEach((k) => {
           const cell = grid[k];
           if (cell.kind === "course" && cell.courseId === id) delete grid[k];
         });
-        return { ...cls, grid };
+        return { ...cls, grid, courses: cls.courses.filter((c) => c.id !== id) };
       }),
     }));
 
@@ -421,7 +460,7 @@ function Index() {
         else if (cell.kind === "break") row.push(`Break: ${cell.label}`);
         else if (cell.kind === "blocked") row.push(`Blocked: ${cell.label}`);
         else if (cell.kind === "course") {
-          const c = state.courses.find((x) => x.id === cell.courseId);
+          const c = cls.courses.find((x) => x.id === cell.courseId);
           row.push(c ? `${c.name} (${c.faculty})` : "");
         } else row.push("");
       });
@@ -452,11 +491,11 @@ function Index() {
     });
   };
 
-  const cellDisplay = (cell: Cell | undefined) => {
+  const cellDisplay = (cell: Cell | undefined, courses: Course[]) => {
     if (!cell || cell.kind === "empty") return { text: "", bg: "#fff", fg: "#94a3b8" };
     if (cell.kind === "break") return { text: cell.label, bg: "#fef3c7", fg: "#92400e" };
     if (cell.kind === "blocked") return { text: cell.label, bg: "#e5e7eb", fg: "#374151" };
-    const course = state.courses.find((c) => c.id === cell.courseId);
+    const course = courses.find((c) => c.id === cell.courseId);
     return {
       text: course ? `${course.name}\n${course.faculty}` : "?",
       bg: course?.color ?? "#ddd",
@@ -546,7 +585,7 @@ function Index() {
                   className="text-[11px] font-bold uppercase tracking-widest text-[#0d0d0d]"
                   style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
                 >
-                  Courses
+                  Courses · {activeClass?.name ?? ""}
                 </h3>
                 <button
                   onClick={addCourse}
@@ -556,7 +595,7 @@ function Index() {
                 </button>
               </div>
               <div className="space-y-2">
-                {state.courses.map((c) => (
+                {(activeClass?.courses ?? []).map((c) => (
                   <div key={c.id} className="border border-[#0d0d0d]/30 bg-white">
                     <div className="flex items-center gap-2 border-b border-[#0d0d0d]/10 px-3 py-2">
                       <span
@@ -602,56 +641,29 @@ function Index() {
                         <span>slot</span>
                       </label>
                     </div>
-                    <div className="border-t border-dashed border-[#0d0d0d]/15 px-3 py-2">
-                      <div className="mb-1 flex items-center justify-between">
-                        <span
-                          className="text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/60"
-                          style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
-                        >
-                          Available days
-                        </span>
-                        {c.allowedWeekdays && c.allowedWeekdays.length > 0 && (
-                          <button
-                            onClick={() => updateCourse(c.id, { allowedWeekdays: [] })}
-                            className="text-[9px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
-                          >
-                            All days
-                          </button>
-                        )}
-                      </div>
-                      <div className="flex gap-1">
-                        {WEEKDAY_LABELS.map((lbl, wd) => {
-                          const rule = c.allowedWeekdays ?? [];
-                          const allAllowed = rule.length === 0;
-                          const active = allAllowed || rule.includes(wd);
-                          return (
-                            <button
-                              key={wd}
-                              title={WEEKDAY_FULL[wd]}
-                              onClick={() => {
-                                const base = allAllowed ? [0, 1, 2, 3, 4, 5, 6] : [...rule];
-                                const next = base.includes(wd)
-                                  ? base.filter((x) => x !== wd)
-                                  : [...base, wd].sort();
-                                // If user re-selects all 7, treat as "all days" (undefined)
-                                updateCourse(c.id, {
-                                  allowedWeekdays: next.length === 7 ? [] : next,
-                                });
-                              }}
-                              className={
-                                "flex h-6 w-6 items-center justify-center border text-[10px] font-bold transition-colors " +
-                                (active
-                                  ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
-                                  : "border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/40 hover:border-[#0d0d0d]/50")
-                              }
-                              style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
-                            >
-                              {lbl}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+                    <button
+                      onClick={() => setRulesFor(c.id)}
+                      className="flex w-full items-center justify-between border-t border-dashed border-[#0d0d0d]/15 px-3 py-2 text-left hover:bg-[#f5f3ee]"
+                    >
+                      <span
+                        className="text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/60"
+                        style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                      >
+                        Available days
+                      </span>
+                      <span
+                        className="truncate text-[10px] text-[#2d2d2d]/70"
+                        style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                      >
+                        {c.allowedWeekdays && c.allowedWeekdays.length > 0
+                          ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(" ")
+                          : "All days"}
+                        {" · "}
+                        {c.allowedSlots && c.allowedSlots.length > 0
+                          ? `P${c.allowedSlots.map((i) => i + 1).join(" P")}`
+                          : "All periods"}
+                      </span>
+                    </button>
                   </div>
                 ))}
               </div>
@@ -911,11 +923,11 @@ function Index() {
                       className="inline-block h-3 w-3"
                       style={{
                         backgroundColor:
-                          state.courses.find((c) => c.id === armedTool.courseId)?.color ?? "#ddd",
+                          (activeClass?.courses ?? []).find((c) => c.id === armedTool.courseId)?.color ?? "#ddd",
                       }}
                     />
                     <span className="font-bold">
-                      {state.courses.find((c) => c.id === armedTool.courseId)?.name ?? "?"}
+                      {(activeClass?.courses ?? []).find((c) => c.id === armedTool.courseId)?.name ?? "?"}
                     </span>
                   </span>
                 ) : (
@@ -1021,7 +1033,7 @@ function Index() {
 
                           const course =
                             cell?.kind === "course"
-                              ? state.courses.find((c) => c.id === cell.courseId)
+                              ? (activeClass?.courses ?? []).find((c) => c.id === cell.courseId)
                               : undefined;
 
                           return (
@@ -1125,16 +1137,26 @@ function Index() {
                 Courses
               </div>
               <div className="mb-4 space-y-1">
-                {state.courses.length === 0 && (
+                {(activeClass?.courses ?? []).length === 0 && (
                   <div className="text-xs text-[#2d2d2d]/60">
                     No courses yet. Add one from the sidebar.
                   </div>
                 )}
-                {state.courses.map((c) => {
-                  const allowed = courseAllowedOn(c, picker.date);
+                {(activeClass?.courses ?? []).map((c) => {
+                  const allowed =
+                    courseAllowedOn(c, picker.date) &&
+                    courseAllowedSlot(c, picker.slotIdx);
                   const ruleLabel =
-                    c.allowedWeekdays && c.allowedWeekdays.length > 0
-                      ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(", ")
+                    (c.allowedWeekdays && c.allowedWeekdays.length > 0) ||
+                    (c.allowedSlots && c.allowedSlots.length > 0)
+                      ? [
+                          c.allowedWeekdays && c.allowedWeekdays.length > 0
+                            ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(",")
+                            : "any day",
+                          c.allowedSlots && c.allowedSlots.length > 0
+                            ? "P" + c.allowedSlots.map((i) => i + 1).join(",")
+                            : "any period",
+                        ].join(" · ")
                       : null;
                   return (
                     <button
@@ -1198,6 +1220,170 @@ function Index() {
           </div>
         </div>
       )}
+
+      {/* Rules editor modal */}
+      {rulesFor && activeClass && (() => {
+        const course = activeClass.courses.find((c) => c.id === rulesFor);
+        if (!course) return null;
+        const wdRule = course.allowedWeekdays ?? [];
+        const wdAll = wdRule.length === 0;
+        const slotRule = course.allowedSlots ?? [];
+        const slotAll = slotRule.length === 0;
+        const nonBreakIdxs = state.slots
+          .map((sl, i) => ({ sl, i }))
+          .filter((x) => !x.sl.isBreak);
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-[#0d0d0d]/60 p-4"
+            onClick={() => setRulesFor(null)}
+          >
+            <div
+              className="w-full max-w-md border-2 border-[#0d0d0d] bg-[#f5f3ee]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between border-b-2 border-[#0d0d0d] bg-[#0d0d0d] px-4 py-3 text-[#f5f3ee]">
+                <div className="min-w-0">
+                  <div className="text-[10px] uppercase tracking-widest text-[#f5f3ee]/60">
+                    Course rules · {activeClass.name}
+                  </div>
+                  <div
+                    className="truncate text-base font-bold"
+                    style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                  >
+                    {course.name}{" "}
+                    <span className="text-xs font-normal text-[#f5f3ee]/60">
+                      · {course.faculty}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setRulesFor(null)}
+                  className="text-lg leading-none text-[#f5f3ee]/60 hover:text-[#f5f3ee]"
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="max-h-[70vh] overflow-y-auto p-4 space-y-4">
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                      Available weekdays
+                    </span>
+                    <button
+                      onClick={() => updateCourse(course.id, { allowedWeekdays: [] })}
+                      className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                    >
+                      All days
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {WEEKDAY_LABELS.map((lbl, wd) => {
+                      const active = wdAll || wdRule.includes(wd);
+                      return (
+                        <button
+                          key={wd}
+                          title={WEEKDAY_FULL[wd]}
+                          onClick={() => {
+                            const base = wdAll ? [0, 1, 2, 3, 4, 5, 6] : [...wdRule];
+                            const next = base.includes(wd)
+                              ? base.filter((x) => x !== wd)
+                              : [...base, wd].sort();
+                            updateCourse(course.id, {
+                              allowedWeekdays: next.length === 7 ? [] : next,
+                            });
+                          }}
+                          className={
+                            "flex h-9 w-9 items-center justify-center border text-xs font-bold " +
+                            (active
+                              ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
+                              : "border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/40 hover:border-[#0d0d0d]/50")
+                          }
+                          style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                        >
+                          {lbl}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-1 text-[10px] text-[#2d2d2d]/50">
+                    Pick the weekdays this faculty is available. Deselect all to
+                    treat every day as allowed.
+                  </p>
+                </div>
+
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                      Available periods
+                    </span>
+                    <button
+                      onClick={() => updateCourse(course.id, { allowedSlots: [] })}
+                      className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                    >
+                      All periods
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                    {nonBreakIdxs.map(({ sl, i }) => {
+                      const active = slotAll || slotRule.includes(i);
+                      const periodNum =
+                        state.slots.slice(0, i + 1).filter((x) => !x.isBreak).length;
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => {
+                            const allIdxs = nonBreakIdxs.map((x) => x.i);
+                            const base = slotAll ? [...allIdxs] : [...slotRule];
+                            const next = base.includes(i)
+                              ? base.filter((x) => x !== i)
+                              : [...base, i].sort((a, b) => a - b);
+                            updateCourse(course.id, {
+                              allowedSlots:
+                                next.length === allIdxs.length ? [] : next,
+                            });
+                          }}
+                          className={
+                            "flex items-center justify-between gap-2 border px-2 py-1.5 text-left text-xs " +
+                            (active
+                              ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
+                              : "border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/60 hover:border-[#0d0d0d]/50")
+                          }
+                        >
+                          <span
+                            className="font-bold"
+                            style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                          >
+                            P{periodNum}
+                          </span>
+                          <span
+                            className="text-[10px] opacity-80"
+                            style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                          >
+                            {slotLabel(sl)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-1 text-[10px] text-[#2d2d2d]/50">
+                    Pick the periods this course can be scheduled in. Break
+                    slots are excluded.
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end border-t-2 border-[#0d0d0d] bg-[#e8e4dd] px-4 py-2">
+                <button
+                  onClick={() => setRulesFor(null)}
+                  className="border-2 border-[#0d0d0d] bg-[#f5f3ee] px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider hover:bg-[#0d0d0d] hover:text-[#f5f3ee]"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
