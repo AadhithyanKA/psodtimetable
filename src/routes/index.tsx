@@ -42,6 +42,9 @@ type Course = {
   allowedWeekdays?: number[];
   // Slot indices. undefined or empty = allowed in all periods.
   allowedSlots?: number[];
+  // Optional active date range for this course. Undefined = entire timetable range.
+  fromDate?: string; // YYYY-MM-DD
+  toDate?: string; // YYYY-MM-DD
 };
 type ClassData = { id: string; name: string; grid: Record<string, Cell>; courses: Course[] };
 type Slot = { start: string; end: string; isBreak?: boolean }; // 24h "HH:MM"
@@ -99,7 +102,13 @@ const weekdayOf = (iso: string): number =>
   utcDateFromIso(iso)?.getUTCDay() ?? 0;
 const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
 const WEEKDAY_FULL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const courseAllowedDate = (course: Course, iso: string): boolean => {
+  if (course.fromDate && iso < course.fromDate) return false;
+  if (course.toDate && iso > course.toDate) return false;
+  return true;
+};
 const courseAllowedOn = (course: Course, iso: string): boolean => {
+  if (!courseAllowedDate(course, iso)) return false;
   const rule = course.allowedWeekdays;
   if (!rule || rule.length === 0) return true;
   return rule.includes(weekdayOf(iso));
@@ -173,6 +182,8 @@ const cleanDurationSlots = (value: unknown, slots: Slot[]): number => {
   const max = Math.max(1, nonBreakCount(slots));
   return whole >= 1 && whole <= max ? whole : 1;
 };
+const isValidIso = (s: unknown): s is string =>
+  typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
   const { allowedPeriods, ...rest } = course;
   const rawAllowedSlots = rest.allowedSlots ?? allowedPeriods ?? [];
@@ -186,6 +197,8 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
     weeklyPeriods: Math.max(0, Math.floor(rest.weeklyPeriods ?? 0)),
     allowedWeekdays: (rest.allowedWeekdays ?? []).filter((day) => day >= 0 && day <= 6),
     allowedSlots: rawAllowedSlots.filter((idx) => idx >= 0 && idx < slots.length && !slots[idx].isBreak),
+    fromDate: isValidIso(rest.fromDate) ? rest.fromDate : undefined,
+    toDate: isValidIso(rest.toDate) ? rest.toDate : undefined,
   };
 };
 const normalizeStateSnapshot = (snapshot: SavedState): State => {
@@ -1142,6 +1155,40 @@ function Index() {
                         <span>/wk</span>
                       </label>
                     </div>
+                    <div className="grid grid-cols-2 gap-2 px-3 pb-2">
+                      <label
+                        className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
+                        style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                      >
+                        <span>From</span>
+                        <input
+                          type="date"
+                          value={c.fromDate ?? ""}
+                          onChange={(e) =>
+                            updateCourse(c.id, {
+                              fromDate: e.target.value || undefined,
+                            })
+                          }
+                          className="w-full border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-[10px] outline-none focus:border-[#0d0d0d]"
+                        />
+                      </label>
+                      <label
+                        className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
+                        style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                      >
+                        <span>To</span>
+                        <input
+                          type="date"
+                          value={c.toDate ?? ""}
+                          onChange={(e) =>
+                            updateCourse(c.id, {
+                              toDate: e.target.value || undefined,
+                            })
+                          }
+                          className="w-full border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-[10px] outline-none focus:border-[#0d0d0d]"
+                        />
+                      </label>
+                    </div>
                     <button
                       onClick={() => setRulesFor(c.id)}
                       className="flex w-full items-center justify-between border-t border-dashed border-[#0d0d0d]/15 px-3 py-2 text-left hover:bg-[#f5f3ee]"
@@ -1156,9 +1203,11 @@ function Index() {
                         className="truncate text-[10px] text-[#2d2d2d]/70"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
-                        {c.allowedWeekdays && c.allowedWeekdays.length > 0
-                          ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(" ")
-                          : "All days"}
+                        {c.fromDate || c.toDate
+                          ? `${c.fromDate ?? "start"} → ${c.toDate ?? "end"}`
+                          : c.allowedWeekdays && c.allowedWeekdays.length > 0
+                            ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(" ")
+                            : "All days"}
                         {" · "}
                         {c.allowedSlots && c.allowedSlots.length > 0
                           ? c.allowedSlots.map((i) => `P${periodNumberFor(i)}`).join(" ")
@@ -1768,13 +1817,16 @@ function Index() {
                   const allowed =
                     courseAllowedOn(c, picker.date) &&
                     courseAllowedSlot(c, picker.slotIdx);
+                  const dateRange = c.fromDate || c.toDate ? `${c.fromDate ?? "start"} → ${c.toDate ?? "end"}` : null;
                   const ruleLabel =
+                    dateRange ||
                     (c.allowedWeekdays && c.allowedWeekdays.length > 0) ||
                     (c.allowedSlots && c.allowedSlots.length > 0)
                       ? [
-                          c.allowedWeekdays && c.allowedWeekdays.length > 0
-                            ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(",")
-                            : "any day",
+                          dateRange ??
+                            (c.allowedWeekdays && c.allowedWeekdays.length > 0
+                              ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(",")
+                              : "any day"),
                           c.allowedSlots && c.allowedSlots.length > 0
                             ? c.allowedSlots
                                 .map((i) => `P${periodNumberFor(i)}`)
@@ -1889,6 +1941,43 @@ function Index() {
                 </button>
               </div>
               <div className="max-h-[70vh] overflow-y-auto p-4 space-y-4">
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                      Active date range
+                    </span>
+                    <button
+                      onClick={() => updateCourse(course.id, { fromDate: undefined, toDate: undefined })}
+                      className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                    >
+                      All dates
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60">
+                      <span>From</span>
+                      <input
+                        type="date"
+                        value={course.fromDate ?? ""}
+                        onChange={(e) => updateCourse(course.id, { fromDate: e.target.value || undefined })}
+                        className="border border-[#0d0d0d]/20 bg-white px-2 py-1 text-xs outline-none focus:border-[#0d0d0d]"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60">
+                      <span>To</span>
+                      <input
+                        type="date"
+                        value={course.toDate ?? ""}
+                        onChange={(e) => updateCourse(course.id, { toDate: e.target.value || undefined })}
+                        className="border border-[#0d0d0d]/20 bg-white px-2 py-1 text-xs outline-none focus:border-[#0d0d0d]"
+                      />
+                    </label>
+                  </div>
+                  <p className="mt-1 text-[10px] text-[#2d2d2d]/50">
+                    Restrict this course to a specific date window. Leave blank to use the full timetable range.
+                  </p>
+                </div>
+
                 <div>
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
