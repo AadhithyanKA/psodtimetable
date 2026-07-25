@@ -1130,6 +1130,48 @@ function Index() {
     }, 0);
   }, [activeClass, dates, state.slots]);
 
+  // Planned vs placed sessions for the current date range. A "session" is one
+  // course start (multi-slot durations count as one). Planned = sum of each
+  // course's weeklyPeriods × number of ISO weeks covered by the range.
+  const sessionStats = useMemo(() => {
+    const isoWeekKey = (iso: string) => {
+      const d = utcDateFromIso(iso);
+      if (!d) return "invalid";
+      const day = (d.getUTCDay() + 6) % 7;
+      const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day + 3));
+      const first = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+      const wk = 1 + Math.round(((t.getTime() - first.getTime()) / 86400000 - 3 + ((first.getUTCDay() + 6) % 7)) / 7);
+      return `${t.getUTCFullYear()}-W${wk}`;
+    };
+    const weekCount = new Set(dates.map(isoWeekKey)).size;
+    const countPlaced = (cls: ClassData) => {
+      let n = 0;
+      dates.forEach((d) => {
+        state.slots.forEach((_, i) => {
+          const cell = cls.grid[`${d}-${i}`];
+          if (cell?.kind !== "course") return;
+          const prev = cls.grid[`${d}-${i - 1}`];
+          if (!prev || prev.kind !== "course" || prev.courseId !== cell.courseId) n++;
+        });
+      });
+      return n;
+    };
+    const planFor = (cls: ClassData) =>
+      cls.courses.reduce((sum, c) => sum + Math.max(0, c.weeklyPeriods ?? 0), 0) * weekCount;
+    const activePlanned = activeClass ? planFor(activeClass) : 0;
+    const activePlaced = activeClass ? countPlaced(activeClass) : 0;
+    const totalPlanned = state.classes.reduce((s, c) => s + planFor(c), 0);
+    const totalPlaced = state.classes.reduce((s, c) => s + countPlaced(c), 0);
+    return {
+      activePlanned,
+      activePlaced,
+      activeRemaining: Math.max(0, activePlanned - activePlaced),
+      totalPlanned,
+      totalPlaced,
+      totalRemaining: Math.max(0, totalPlanned - totalPlaced),
+    };
+  }, [activeClass, dates, state.slots, state.classes]);
+
   return (
     <div
       className="min-h-screen w-full bg-[#f5f3ee] text-[#2d2d2d]"
