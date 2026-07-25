@@ -1368,6 +1368,23 @@ function Index() {
                         />
                         <span>/wk</span>
                       </label>
+                      <label
+                        title="Total sessions across the whole date range. Overrides /wk when set."
+                        className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
+                        style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                      >
+                        <input
+                          type="number"
+                          min={0}
+                          value={c.totalSessions ?? 0}
+                          onChange={(e) => {
+                            const n = Math.max(0, parseInt(e.target.value || "0", 10));
+                            updateCourse(c.id, { totalSessions: n > 0 ? n : undefined });
+                          }}
+                          className="w-12 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
+                        />
+                        <span>total</span>
+                      </label>
                     </div>
                     <div className="grid grid-cols-2 gap-2 px-3 pb-2">
                       <label
