@@ -474,6 +474,10 @@ function Index() {
         grid: { ...cls.grid },
       }));
 
+      let totalTarget = 0;
+      let placedCount = 0;
+      const unmet: string[] = [];
+
       // Optionally wipe existing course cells (keep breaks + blocks + manual? overwrite=true wipes only course cells)
       if (opts.overwrite) {
         classes.forEach((cls) => {
@@ -526,6 +530,7 @@ function Index() {
           cls.courses.forEach((course) => {
             const target = course.weeklyPeriods ?? 0;
             if (target <= 0) return;
+            totalTarget += target;
             // Count sessions already placed for this course in this week
             let placed = 0;
             const perDay: Record<string, number> = {};
@@ -578,8 +583,31 @@ function Index() {
             }
             task.perDay[best.date] = (task.perDay[best.date] ?? 0) + 1;
             task.remaining--;
+            placedCount++;
             progressed = true;
           }
+        }
+        tasks.forEach((t) => {
+          if (t.remaining > 0)
+            unmet.push(`${t.cls.name} · ${t.course.name}: ${t.remaining} left`);
+        });
+      });
+
+      // Diagnostic feedback so the user knows why nothing happened
+      queueMicrotask(() => {
+        if (totalTarget === 0) {
+          alert(
+            "Nothing to auto-fill.\n\nSet a weekly target (the /wk field) on at least one course. Currently every course has weekly = 0.",
+          );
+        } else if (placedCount === 0) {
+          alert(
+            "Auto-fill couldn't place anything.\n\nCheck: date range, course rules (allowed days/periods), and that empty slots exist (or use Regenerate).",
+          );
+        } else if (unmet.length > 0) {
+          alert(
+            `Placed ${placedCount} sessions.\n\nCouldn't fully satisfy:\n` +
+              unmet.slice(0, 10).join("\n"),
+          );
         }
       });
 
