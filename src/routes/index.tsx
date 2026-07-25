@@ -2092,6 +2092,20 @@ function Index() {
                   const allowed =
                     courseAllowedOn(c, picker.date) &&
                     courseAllowedSlotOn(c, picker.slotIdx, picker.date);
+                  // Count placed sessions of this course in the current date range
+                  let placedForCourse = 0;
+                  if (activeClass) {
+                    dates.forEach((d) => {
+                      state.slots.forEach((_, i) => {
+                        const cell = activeClass.grid[`${d}-${i}`];
+                        if (cell?.kind === "course" && cell.courseId === c.id) {
+                          const prev = activeClass.grid[`${d}-${i - 1}`];
+                          if (!prev || prev.kind !== "course" || prev.courseId !== c.id)
+                            placedForCourse++;
+                        }
+                      });
+                    });
+                  }
                   const dateRange = c.fromDate || c.toDate ? `${c.fromDate ?? "start"} → ${c.toDate ?? "end"}` : null;
                   const ruleLabel =
                     dateRange ||
@@ -2132,6 +2146,14 @@ function Index() {
                         <span className="block truncate text-[11px] text-[#2d2d2d]/60">
                           {c.faculty}
                           {ruleLabel && ` · ${ruleLabel} only`}
+                        </span>
+                        <span
+                          className="mt-0.5 block text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/70"
+                          style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                        >
+                          {c.totalSessions && c.totalSessions > 0
+                            ? `${placedForCourse} / ${c.totalSessions} sessions`
+                            : `${placedForCourse} placed · no total set`}
                         </span>
                       </span>
                       {!allowed && (
