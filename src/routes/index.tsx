@@ -1651,6 +1651,13 @@ function Index() {
                 }}
               />
               <button
+                onClick={clearTimetable}
+                className="border-2 border-red-700 bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-red-700 transition-transform hover:bg-red-50 active:translate-y-0.5"
+                title="Clear all course assignments"
+              >
+                Clear
+              </button>
+              <button
                 onClick={() => fileInputRef.current?.click()}
                 className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
                 title="Load a .aadhi file"
