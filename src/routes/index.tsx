@@ -102,7 +102,13 @@ const weekdayOf = (iso: string): number =>
   utcDateFromIso(iso)?.getUTCDay() ?? 0;
 const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
 const WEEKDAY_FULL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const courseAllowedDate = (course: Course, iso: string): boolean => {
+  if (course.fromDate && iso < course.fromDate) return false;
+  if (course.toDate && iso > course.toDate) return false;
+  return true;
+};
 const courseAllowedOn = (course: Course, iso: string): boolean => {
+  if (!courseAllowedDate(course, iso)) return false;
   const rule = course.allowedWeekdays;
   if (!rule || rule.length === 0) return true;
   return rule.includes(weekdayOf(iso));
