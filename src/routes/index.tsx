@@ -164,12 +164,21 @@ function Index() {
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<State>;
         const base = defaultState();
+        // Migrate v4 → v5: top-level `courses` moved into each class
+        const legacyCourses: Course[] | undefined = (parsed as { courses?: Course[] }).courses;
+        const migratedClasses: ClassData[] = (parsed.classes ?? base.classes).map(
+          (cls) => ({
+            ...cls,
+            courses:
+              (cls as ClassData).courses ??
+              (legacyCourses ? legacyCourses.map((c) => ({ ...c })) : []),
+          }),
+        );
         const merged: State = {
           ...base,
           ...parsed,
           slots: parsed.slots ?? base.slots,
-          courses: parsed.courses ?? base.courses,
-          classes: parsed.classes ?? base.classes,
+          classes: migratedClasses,
         };
         setState(merged);
         setActiveClassId(merged.classes[0]?.id ?? "");
