@@ -1762,6 +1762,40 @@ function Index() {
             >
               {dates.length} day{dates.length === 1 ? "" : "s"} · {state.slots.length} slots · {activeVisibleCourseSlots} filled
             </span>
+            <span className="text-[#2d2d2d]/20">·</span>
+            <span
+              className="flex flex-wrap items-center gap-2 text-[11px]"
+              style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+            >
+              <span
+                className={
+                  "border-2 px-2 py-0.5 font-bold " +
+                  (sessionStats.activeRemaining === 0
+                    ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                    : "border-[#0d0d0d] bg-white text-[#0d0d0d]")
+                }
+                title="This class · placed / planned (remaining)"
+              >
+                {activeClass?.name ?? "Class"}: {sessionStats.activePlaced}/{sessionStats.activePlanned}
+                <span className="ml-1 text-[#2d2d2d]/60">
+                  · {sessionStats.activeRemaining} left
+                </span>
+              </span>
+              <span
+                className={
+                  "border-2 px-2 py-0.5 font-bold " +
+                  (sessionStats.totalRemaining === 0
+                    ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                    : "border-[#0d0d0d]/60 bg-[#f5f3ee] text-[#0d0d0d]")
+                }
+                title="All classes · placed / planned (remaining)"
+              >
+                All: {sessionStats.totalPlaced}/{sessionStats.totalPlanned}
+                <span className="ml-1 text-[#2d2d2d]/60">
+                  · {sessionStats.totalRemaining} left
+                </span>
+              </span>
+            </span>
             {armedTool && (
               <div className="ml-auto flex items-center gap-2 border-2 border-[#0d0d0d] bg-white px-2 py-1">
                 <span className="text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/50">
