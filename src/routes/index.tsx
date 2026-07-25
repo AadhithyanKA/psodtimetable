@@ -30,7 +30,7 @@ type Cell =
   | { kind: "blocked"; label: string }
   | { kind: "course"; courseId: string };
 
-type Course = { id: string; name: string; faculty: string; color: string };
+type Course = { id: string; name: string; faculty: string; color: string; durationSlots: number };
 type ClassData = { id: string; name: string; grid: Record<string, Cell> };
 type State = {
   fromDate: string; // YYYY-MM-DD
@@ -78,9 +78,9 @@ function defaultState(): State {
     "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00",
   ];
   const courses: Course[] = [
-    { id: "c1", name: "Mathematics", faculty: "Dr. Smith", color: COLORS[0] },
-    { id: "c2", name: "Physics", faculty: "Dr. Jones", color: COLORS[2] },
-    { id: "c3", name: "Chemistry", faculty: "Dr. Patel", color: COLORS[4] },
+    { id: "c1", name: "Mathematics", faculty: "Dr. Smith", color: COLORS[0], durationSlots: 1 },
+    { id: "c2", name: "Physics", faculty: "Dr. Jones", color: COLORS[2], durationSlots: 1 },
+    { id: "c3", name: "Chemistry", faculty: "Dr. Patel", color: COLORS[4], durationSlots: 1 },
   ];
   const mkGrid = (): Record<string, Cell> => ({});
   return {
@@ -108,6 +108,9 @@ function Index() {
   const [picker, setPicker] = useState<{ date: string; slotIdx: number } | null>(null);
   const [armedTool, setArmedTool] = useState<Tool | null>(null);
   const [isPainting, setIsPainting] = useState(false);
+  const [bulkWeekdays, setBulkWeekdays] = useState<number[]>([]);
+  const [bulkSlots, setBulkSlots] = useState<number[]>([]);
+  const [bulkAllClasses, setBulkAllClasses] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -163,14 +166,57 @@ function Index() {
       classes: s.classes.map((cls) => {
         if (cls.id !== activeClassId) return cls;
         const grid = { ...cls.grid };
-        const key = `${date}-${slotIdx}`;
-        if (tool.kind === "erase") delete grid[key];
-        else if (tool.kind === "break") grid[key] = { kind: "break", label: "Break" };
-        else if (tool.kind === "blocked") grid[key] = { kind: "blocked", label: "Blocked" };
-        else grid[key] = { kind: "course", courseId: tool.courseId };
+        // How many slots does this tool span?
+        let span = 1;
+        if (tool.kind === "course") {
+          const course = s.courses.find((c) => c.id === tool.courseId);
+          span = Math.max(1, course?.durationSlots ?? 1);
+        }
+        for (let k = 0; k < span; k++) {
+          const idx = slotIdx + k;
+          if (idx >= s.slots.length) break;
+          const key = `${date}-${idx}`;
+          if (tool.kind === "erase") delete grid[key];
+          else if (tool.kind === "break") grid[key] = { kind: "break", label: "Break" };
+          else if (tool.kind === "blocked") grid[key] = { kind: "blocked", label: "Blocked" };
+          else grid[key] = { kind: "course", courseId: tool.courseId };
+        }
         return { ...cls, grid };
       }),
     }));
+  };
+
+  // Bulk block/break by weekday + slot indices
+  const applyBulk = (
+    weekdays: number[], // 0..6 (Sun..Sat)
+    slotIdxs: number[],
+    kind: "blocked" | "break" | "erase",
+    allClasses: boolean,
+  ) => {
+    setState((s) => {
+      const wdSet = new Set(weekdays);
+      const sSet = new Set(slotIdxs);
+      const targetDates = daysBetween(s.fromDate, s.toDate).filter((iso) =>
+        wdSet.has(new Date(iso + "T00:00:00").getDay()),
+      );
+      return {
+        ...s,
+        classes: s.classes.map((cls) => {
+          if (!allClasses && cls.id !== activeClassId) return cls;
+          const grid = { ...cls.grid };
+          targetDates.forEach((date) => {
+            s.slots.forEach((_, i) => {
+              if (!sSet.has(i)) return;
+              const key = `${date}-${i}`;
+              if (kind === "erase") delete grid[key];
+              else if (kind === "break") grid[key] = { kind: "break", label: "Break" };
+              else grid[key] = { kind: "blocked", label: "Blocked" };
+            });
+          });
+          return { ...cls, grid };
+        }),
+      };
+    });
   };
 
   const onCellMouseDown = (date: string, slotIdx: number, e: React.MouseEvent) => {
@@ -243,6 +289,7 @@ function Index() {
           name: "New Course",
           faculty: "Faculty",
           color: COLORS[s.courses.length % COLORS.length],
+          durationSlots: 1,
         },
       ],
     }));
@@ -461,6 +508,21 @@ function Index() {
                         placeholder="Faculty"
                         className="w-full rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
                       />
+                      <label className="flex items-center gap-2 text-xs text-slate-600">
+                        Duration
+                        <input
+                          type="number"
+                          min={1}
+                          value={c.durationSlots}
+                          onChange={(e) =>
+                            updateCourse(c.id, {
+                              durationSlots: Math.max(1, parseInt(e.target.value || "1", 10)),
+                            })
+                          }
+                          className="w-14 rounded border border-slate-200 px-2 py-1 text-xs"
+                        />
+                        <span>slot(s)</span>
+                      </label>
                     </div>
                     <button
                       onClick={() => removeCourse(c.id)}
@@ -474,11 +536,105 @@ function Index() {
             </div>
           </section>
 
+          <section className="rounded-lg border border-slate-200 bg-white p-4">
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-600">
+              Bulk block / break
+            </h2>
+            <div className="space-y-3 text-xs">
+              <div>
+                <div className="mb-1 font-medium text-slate-700">Weekdays</div>
+                <div className="flex flex-wrap gap-1">
+                  {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((w, i) => {
+                    const on = bulkWeekdays.includes(i);
+                    return (
+                      <button
+                        key={i}
+                        onClick={() =>
+                          setBulkWeekdays((prev) =>
+                            prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i],
+                          )
+                        }
+                        className={`rounded border px-2 py-1 ${
+                          on
+                            ? "border-slate-900 bg-slate-900 text-white"
+                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        {w}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <div className="mb-1 font-medium text-slate-700">Time slots</div>
+                <div className="max-h-40 space-y-1 overflow-y-auto rounded border border-slate-200 p-2">
+                  {state.slots.map((slot, i) => {
+                    const on = bulkSlots.includes(i);
+                    return (
+                      <label key={i} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={() =>
+                            setBulkSlots((prev) =>
+                              prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i],
+                            )
+                          }
+                        />
+                        <span>{slot}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={bulkAllClasses}
+                  onChange={(e) => setBulkAllClasses(e.target.checked)}
+                />
+                <span>Apply to all classes</span>
+              </label>
+              <div className="grid grid-cols-3 gap-1">
+                <button
+                  onClick={() =>
+                    applyBulk(bulkWeekdays, bulkSlots, "blocked", bulkAllClasses)
+                  }
+                  disabled={bulkWeekdays.length === 0 || bulkSlots.length === 0}
+                  className="rounded border border-slate-300 bg-slate-100 px-2 py-1 font-medium disabled:opacity-50"
+                >
+                  Block
+                </button>
+                <button
+                  onClick={() =>
+                    applyBulk(bulkWeekdays, bulkSlots, "break", bulkAllClasses)
+                  }
+                  disabled={bulkWeekdays.length === 0 || bulkSlots.length === 0}
+                  className="rounded border border-amber-200 bg-amber-100 px-2 py-1 font-medium text-amber-800 disabled:opacity-50"
+                >
+                  Break
+                </button>
+                <button
+                  onClick={() =>
+                    applyBulk(bulkWeekdays, bulkSlots, "erase", bulkAllClasses)
+                  }
+                  disabled={bulkWeekdays.length === 0 || bulkSlots.length === 0}
+                  className="rounded border border-slate-200 bg-white px-2 py-1 font-medium hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          </section>
+
           <section className="rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-600">
             <p className="font-semibold text-slate-700">How to use</p>
             <ol className="mt-2 list-decimal space-y-1 pl-4">
               <li>Click any empty cell → pick a course, break, or block.</li>
               <li>Then click-and-drag across cells to paint the same choice.</li>
+              <li>Set a course "Duration" to auto-fill consecutive slots.</li>
+              <li>Use Bulk block to disable e.g. last 2 slots every Wednesday.</li>
               <li>Faculty double-booked across classes gets flagged red.</li>
             </ol>
           </section>
