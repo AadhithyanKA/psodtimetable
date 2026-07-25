@@ -42,6 +42,10 @@ type Course = {
   allowedWeekdays?: number[];
   // Slot indices. undefined or empty = allowed in all periods.
   allowedSlots?: number[];
+  // Per-weekday period override. If a weekday key is present (even as [])
+  // it fully replaces `allowedSlots` for that weekday. Missing key = fall
+  // back to `allowedSlots`.
+  allowedSlotsByWeekday?: Record<number, number[]>;
   // Optional active date range for this course. Undefined = entire timetable range.
   fromDate?: string; // YYYY-MM-DD
   toDate?: string; // YYYY-MM-DD
@@ -118,6 +122,28 @@ const courseAllowedSlot = (course: Course, slotIdx: number): boolean => {
   if (!rule || rule.length === 0) return true;
   return rule.includes(slotIdx);
 };
+// Weekday-aware slot check. Per-weekday override wins over allowedSlots.
+const courseAllowedSlotOn = (
+  course: Course,
+  slotIdx: number,
+  iso: string,
+): boolean => {
+  const perDay = course.allowedSlotsByWeekday?.[weekdayOf(iso)];
+  if (perDay !== undefined) return perDay.includes(slotIdx);
+  return courseAllowedSlot(course, slotIdx);
+};
+// Effective allowed slot indices for a course on a given date (weekday-aware).
+// Returns null when "all periods" are allowed (no restriction).
+const effectiveAllowedSlots = (
+  course: Course,
+  iso: string,
+): number[] | null => {
+  const perDay = course.allowedSlotsByWeekday?.[weekdayOf(iso)];
+  if (perDay !== undefined) return [...perDay].sort((a, b) => a - b);
+  const base = course.allowedSlots;
+  if (!base || base.length === 0) return null;
+  return [...base].sort((a, b) => a - b);
+};
 
 const parseHM = (s: string): number => {
   const [h, m] = s.split(":").map((x) => parseInt(x, 10));
@@ -187,6 +213,23 @@ const isValidIso = (s: unknown): s is string =>
 const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
   const { allowedPeriods, ...rest } = course;
   const rawAllowedSlots = rest.allowedSlots ?? allowedPeriods ?? [];
+  const validSlotIdx = (idx: unknown) =>
+    typeof idx === "number" &&
+    idx >= 0 &&
+    idx < slots.length &&
+    !slots[idx].isBreak;
+  let allowedByWd: Record<number, number[]> | undefined;
+  const rawByWd = (rest as { allowedSlotsByWeekday?: unknown }).allowedSlotsByWeekday;
+  if (rawByWd && typeof rawByWd === "object") {
+    const out: Record<number, number[]> = {};
+    for (const [k, v] of Object.entries(rawByWd as Record<string, unknown>)) {
+      const wd = parseInt(k, 10);
+      if (wd < 0 || wd > 6 || Number.isNaN(wd)) continue;
+      if (!Array.isArray(v)) continue;
+      out[wd] = (v as unknown[]).filter(validSlotIdx) as number[];
+    }
+    if (Object.keys(out).length > 0) allowedByWd = out;
+  }
   return {
     ...rest,
     id: rest.id || `c${Date.now()}`,
@@ -197,6 +240,7 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
     weeklyPeriods: Math.max(0, Math.floor(rest.weeklyPeriods ?? 0)),
     allowedWeekdays: (rest.allowedWeekdays ?? []).filter((day) => day >= 0 && day <= 6),
     allowedSlots: rawAllowedSlots.filter((idx) => idx >= 0 && idx < slots.length && !slots[idx].isBreak),
+    allowedSlotsByWeekday: allowedByWd,
     fromDate: isValidIso(rest.fromDate) ? rest.fromDate : undefined,
     toDate: isValidIso(rest.toDate) ? rest.toDate : undefined,
   };
@@ -331,7 +375,7 @@ function Index() {
             if (!course) return;
             (facultyToClass[course.faculty] ??= []).push(cls.id);
             // Rule violation: course placed on a weekday or period it isn't allowed
-            if (!courseAllowedOn(course, date) || !courseAllowedSlot(course, i)) {
+            if (!courseAllowedOn(course, date) || !courseAllowedSlotOn(course, i, date)) {
               set.add(`${cls.id}:${key}`);
             }
           }
@@ -368,7 +412,7 @@ function Index() {
           if (s.slots[idx].isBreak) continue; // never write into break slots
           if (tool.kind === "course") {
             const course = cls.courses.find((c) => c.id === tool.courseId);
-            if (course && !courseAllowedSlot(course, idx)) continue;
+            if (course && !courseAllowedSlotOn(course, idx, date)) continue;
           }
           const key = `${date}-${idx}`;
           if (tool.kind === "erase") delete grid[key];
@@ -573,22 +617,23 @@ function Index() {
         .filter(({ slot }) => !slot.isBreak)
         .map(({ idx }) => idx);
 
-      const startSlotsFor = (course: Course): number[] => {
-        const explicitSlots = (course.allowedSlots ?? [])
+      const startSlotsFor = (course: Course, date: string): number[] => {
+        const eff = effectiveAllowedSlots(course, date);
+        const explicitSlots = (eff ?? [])
           .filter((idx) => idx >= 0 && idx < s.slots.length && !s.slots[idx].isBreak)
           .sort((a, b) => a - b);
-        if (opts.strictRules) return explicitSlots.length > 0 ? explicitSlots : allNonBreakStarts;
-        return (explicitSlots.length > 0 ? explicitSlots : allNonBreakStarts).filter((idx) =>
-          courseAllowedSlot(course, idx),
+        if (opts.strictRules) return eff ? explicitSlots : allNonBreakStarts;
+        return (eff ? explicitSlots : allNonBreakStarts).filter((idx) =>
+          courseAllowedSlotOn(course, idx, date),
         );
       };
 
-      const spanFitsCourse = (course: Course, start: number): boolean => {
+      const spanFitsCourse = (course: Course, start: number, date: string): boolean => {
         for (let i = 0; i < cleanDurationSlots(course.durationSlots, s.slots); i++) {
           const idx = start + i;
           if (idx >= s.slots.length) return false;
           if (s.slots[idx].isBreak) return false;
-          if (!opts.strictRules && !courseAllowedSlot(course, idx)) return false;
+          if (!opts.strictRules && !courseAllowedSlotOn(course, idx, date)) return false;
         }
         return true;
       };
@@ -596,9 +641,9 @@ function Index() {
       // Per-class occupancy already lives in cls.grid (any non-empty cell blocks placement).
       const canPlace = (cls: ClassData, course: Course, date: string, start: number): boolean => {
         if (!courseAllowedOn(course, date)) return false;
-        const possibleStarts = startSlotsFor(course);
+        const possibleStarts = startSlotsFor(course, date);
         if (!possibleStarts.includes(start)) return false;
-        if (!spanFitsCourse(course, start)) return false;
+        if (!spanFitsCourse(course, start, date)) return false;
         for (let i = 0; i < cleanDurationSlots(course.durationSlots, s.slots); i++) {
           const idx = start + i;
           const key = `${date}-${idx}`;
@@ -620,14 +665,21 @@ function Index() {
 
       // Round-robin across (class, course) to spread placements fairly
       weeks.forEach((weekDates) => {
-        type Task = { cls: ClassData; course: Course; remaining: number; perDay: Record<string, number>; starts: number[] };
+        type Task = { cls: ClassData; course: Course; remaining: number; perDay: Record<string, number>; startsByDate: Record<string, number[]> };
         const tasks: Task[] = [];
         classes.forEach((cls) => {
           cls.courses.forEach((course) => {
-            const starts = startSlotsFor(course).filter((start) => spanFitsCourse(course, start));
+            const startsByDate: Record<string, number[]> = {};
+            let cap = 0;
+            weekDates.forEach((d) => {
+              if (!courseAllowedOn(course, d)) return;
+              const starts = startSlotsFor(course, d).filter((start) =>
+                spanFitsCourse(course, start, d),
+              );
+              startsByDate[d] = starts;
+              cap += starts.length;
+            });
             let target = course.weeklyPeriods ?? 0;
-            const availableDays = weekDates.filter((d) => courseAllowedOn(course, d)).length;
-            const cap = availableDays * starts.length;
             if (cap > 0) {
               // If /wk is 0 or missing, use every allowed weekday × allowed-period opportunity.
               // This keeps added courses eligible even when the weekly target field is untouched.
@@ -653,7 +705,7 @@ function Index() {
               });
             });
             const remaining = Math.max(0, target - placed);
-            if (remaining > 0) tasks.push({ cls, course, remaining, perDay, starts });
+            if (remaining > 0) tasks.push({ cls, course, remaining, perDay, startsByDate });
           });
         });
 
@@ -672,7 +724,8 @@ function Index() {
             // Score candidates: prefer days with fewest sessions of this course, then earliest slot
             let best: { date: string; slot: number; score: number } | null = null;
             for (const date of weekDates) {
-              for (const sIdx of task.starts) {
+              const starts = task.startsByDate[date] ?? [];
+              for (const sIdx of starts) {
                 if (!canPlace(task.cls, task.course, date, sIdx)) continue;
                 const score = (task.perDay[date] ?? 0) * 100 + sIdx;
                 if (!best || score < best.score) best = { date, slot: sIdx, score };
@@ -1212,6 +1265,9 @@ function Index() {
                         {c.allowedSlots && c.allowedSlots.length > 0
                           ? c.allowedSlots.map((i) => `P${periodNumberFor(i)}`).join(" ")
                           : "All periods"}
+                        {c.allowedSlotsByWeekday && Object.keys(c.allowedSlotsByWeekday).length > 0
+                          ? " · per-day"
+                          : ""}
                       </span>
                     </button>
                   </div>
@@ -1816,7 +1872,7 @@ function Index() {
                 {(activeClass?.courses ?? []).map((c) => {
                   const allowed =
                     courseAllowedOn(c, picker.date) &&
-                    courseAllowedSlot(c, picker.slotIdx);
+                    courseAllowedSlotOn(c, picker.slotIdx, picker.date);
                   const dateRange = c.fromDate || c.toDate ? `${c.fromDate ?? "start"} → ${c.toDate ?? "end"}` : null;
                   const ruleLabel =
                     dateRange ||
@@ -2083,6 +2139,111 @@ function Index() {
                     Pick the periods this course can be scheduled in. Break
                     slots are excluded.
                   </p>
+                </div>
+
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                      Per-weekday periods
+                    </span>
+                    <button
+                      onClick={() =>
+                        updateCourse(course.id, { allowedSlotsByWeekday: undefined })
+                      }
+                      className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                    >
+                      Reset all
+                    </button>
+                  </div>
+                  <p className="mb-2 text-[10px] text-[#2d2d2d]/50">
+                    Optional. Override the default periods above for specific
+                    weekdays (e.g. Mon P1–P2, Thu P5–P6). Unset weekdays fall
+                    back to the default.
+                  </p>
+                  <div className="space-y-1.5">
+                    {WEEKDAY_LABELS.map((_lbl, wd) => {
+                      if (!wdAll && !wdRule.includes(wd)) return null;
+                      const byWd = course.allowedSlotsByWeekday ?? {};
+                      const override = byWd[wd];
+                      const isCustom = override !== undefined;
+                      const activeSet = isCustom
+                        ? new Set(override)
+                        : new Set(slotAll ? nonBreakIdxs.map((x) => x.i) : slotRule);
+                      return (
+                        <div
+                          key={wd}
+                          className="border border-[#0d0d0d]/15 bg-white px-2 py-1.5"
+                        >
+                          <div className="mb-1 flex items-center justify-between">
+                            <span
+                              className="text-[10px] font-bold uppercase tracking-wider"
+                              style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                            >
+                              {WEEKDAY_FULL[wd]}
+                              {!isCustom && (
+                                <span className="ml-1 text-[9px] font-normal text-[#2d2d2d]/40">
+                                  · default
+                                </span>
+                              )}
+                            </span>
+                            {isCustom && (
+                              <button
+                                onClick={() => {
+                                  const next = { ...byWd };
+                                  delete next[wd];
+                                  updateCourse(course.id, {
+                                    allowedSlotsByWeekday:
+                                      Object.keys(next).length > 0 ? next : undefined,
+                                  });
+                                }}
+                                className="text-[9px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                              >
+                                Reset
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {nonBreakIdxs.map(({ i }) => {
+                              const periodNum = state.slots
+                                .slice(0, i + 1)
+                                .filter((x) => !x.isBreak).length;
+                              const on = activeSet.has(i);
+                              return (
+                                <button
+                                  key={i}
+                                  onClick={() => {
+                                    const baseArr = isCustom
+                                      ? [...override!]
+                                      : slotAll
+                                        ? nonBreakIdxs.map((x) => x.i)
+                                        : [...slotRule];
+                                    const nextArr = baseArr.includes(i)
+                                      ? baseArr.filter((x) => x !== i)
+                                      : [...baseArr, i].sort((a, b) => a - b);
+                                    const nextByWd = { ...byWd, [wd]: nextArr };
+                                    updateCourse(course.id, {
+                                      allowedSlotsByWeekday: nextByWd,
+                                    });
+                                  }}
+                                  className={
+                                    "min-w-[2.25rem] border px-1.5 py-0.5 text-[10px] font-bold " +
+                                    (on
+                                      ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
+                                      : isCustom
+                                        ? "border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/40 hover:border-[#0d0d0d]/50"
+                                        : "border-dashed border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/30 hover:border-[#0d0d0d]/40")
+                                  }
+                                  style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                                >
+                                  P{periodNum}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
               <div className="flex justify-end border-t-2 border-[#0d0d0d] bg-[#e8e4dd] px-4 py-2">
