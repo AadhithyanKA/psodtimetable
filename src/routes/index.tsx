@@ -40,6 +40,13 @@ type Course = {
   durationSlots: number;
   // Target number of sessions per week (used by auto-fill). 0 = don't auto-fill.
   weeklyPeriods?: number;
+  // LTPC structure. When any of L/T/P > 0 the weekly session target is
+  // derived as L + T + 2*P (1 practical hour = 2 sessions) and overrides
+  // `weeklyPeriods` in auto-fill and planned counters. C is informational.
+  lectureHours?: number;
+  tutorialHours?: number;
+  practicalHours?: number;
+  credits?: number;
   // Total number of sessions to place across the whole date range.
   // When set (>0) this overrides the per-week weeklyPeriods target during auto-fill
   // and drives the planned/remaining counters.
@@ -208,6 +215,16 @@ type SavedState = Partial<Omit<State, "classes">> & {
 };
 
 const nonBreakCount = (slots: Slot[]) => slots.filter((slot) => !slot.isBreak).length;
+// LTPC-derived weekly session target. 1 L or T hour = 1 session; 1 P hour = 2
+// sessions (practicals are double periods). Falls back to weeklyPeriods when
+// no LTPC values are set.
+const courseWeeklyTarget = (course: Course): number => {
+  const L = Math.max(0, course.lectureHours ?? 0);
+  const T = Math.max(0, course.tutorialHours ?? 0);
+  const P = Math.max(0, course.practicalHours ?? 0);
+  if (L + T + P > 0) return L + T + 2 * P;
+  return Math.max(0, course.weeklyPeriods ?? 0);
+};
 const cleanDurationSlots = (value: unknown, slots: Slot[]): number => {
   const parsed = typeof value === "number" ? value : parseInt(String(value ?? "1"), 10);
   const whole = Number.isFinite(parsed) ? Math.floor(parsed) : 1;
@@ -245,6 +262,10 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
     color: rest.color || COLORS[0],
     durationSlots: cleanDurationSlots(rest.durationSlots, slots),
     weeklyPeriods: Math.max(0, Math.floor(rest.weeklyPeriods ?? 0)),
+    lectureHours: Math.max(0, Math.floor(rest.lectureHours ?? 0)) || undefined,
+    tutorialHours: Math.max(0, Math.floor(rest.tutorialHours ?? 0)) || undefined,
+    practicalHours: Math.max(0, Math.floor(rest.practicalHours ?? 0)) || undefined,
+    credits: Math.max(0, Math.floor(rest.credits ?? 0)) || undefined,
     totalSessions:
       rest.totalSessions === undefined || rest.totalSessions === null
         ? undefined
@@ -953,7 +974,7 @@ function Index() {
             return;
           }
           weeks.forEach((weekDates, key) => {
-            const desired = course.weeklyPeriods && course.weeklyPeriods > 0 ? course.weeklyPeriods : 0;
+            const desired = courseWeeklyTarget(course);
             addTask(cls, course, weekDates, desired, key);
           });
         });
@@ -1521,7 +1542,7 @@ function Index() {
       cls.courses.reduce((sum, c) => {
         const requested = c.totalSessions && c.totalSessions > 0
           ? c.totalSessions
-          : Math.max(0, c.weeklyPeriods ?? 0) * weekCount;
+          : courseWeeklyTarget(c) * weekCount;
         const capacity = countCourseRuleCapacity(c, state.slots, dates);
         if (requested <= 0) return sum + capacity;
         return sum + Math.min(requested, capacity);
@@ -1679,6 +1700,31 @@ function Index() {
                       />
                     </div>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
+                      {([
+                        ["lectureHours", "L", "Lecture hours per week"],
+                        ["tutorialHours", "T", "Tutorial hours per week"],
+                        ["practicalHours", "P", "Practical hours per week (each hour = 2 sessions)"],
+                        ["credits", "C", "Credits (informational)"],
+                      ] as [keyof Course, string, string][]).map(([field, label, tip]) => (
+                        <label
+                          key={field as string}
+                          title={tip}
+                          className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
+                          style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                        >
+                          <span>{label}</span>
+                          <input
+                            type="number"
+                            min={0}
+                            value={(c[field] as number | undefined) ?? 0}
+                            onChange={(e) => {
+                              const n = Math.max(0, parseInt(e.target.value || "0", 10));
+                              updateCourse(c.id, { [field]: n > 0 ? n : undefined } as Partial<Course>);
+                            }}
+                            className="w-10 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
+                          />
+                        </label>
+                      ))}
                       <label
                         className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
@@ -1698,21 +1744,27 @@ function Index() {
                         <span title="Consecutive periods per session">span</span>
                       </label>
                       <label
-                        title="Sessions per week (auto-fill target)"
+                        title="Sessions per week (auto-fill target). Derived from LTPC (L+T+2P) when any of L/T/P is set."
                         className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
-                        <input
-                          type="number"
-                          min={0}
-                          value={c.weeklyPeriods ?? 0}
-                          onChange={(e) =>
-                            updateCourse(c.id, {
-                              weeklyPeriods: Math.max(0, parseInt(e.target.value || "0", 10)),
-                            })
-                          }
-                          className="w-10 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
-                        />
+                        {((c.lectureHours ?? 0) + (c.tutorialHours ?? 0) + (c.practicalHours ?? 0)) > 0 ? (
+                          <span className="rounded bg-[#0d0d0d]/5 px-1.5 py-0.5 text-xs">
+                            {courseWeeklyTarget(c)}
+                          </span>
+                        ) : (
+                          <input
+                            type="number"
+                            min={0}
+                            value={c.weeklyPeriods ?? 0}
+                            onChange={(e) =>
+                              updateCourse(c.id, {
+                                weeklyPeriods: Math.max(0, parseInt(e.target.value || "0", 10)),
+                              })
+                            }
+                            className="w-10 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
+                          />
+                        )}
                         <span>/wk</span>
                       </label>
                       <label
