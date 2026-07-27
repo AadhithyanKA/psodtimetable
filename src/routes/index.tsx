@@ -490,6 +490,7 @@ function Index() {
   // Conflict detection across classes
   const conflicts = useMemo(() => {
     const set = new Set<string>();
+    if (state.frozen) return set;
     dates.forEach((date) => {
       state.slots.forEach((_, i) => {
         const key = `${date}-${i}`;
