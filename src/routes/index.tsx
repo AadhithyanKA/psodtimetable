@@ -974,6 +974,7 @@ function Index() {
 
       classes.forEach((cls) => {
         cls.courses.forEach((course) => {
+          if (course.disabled) return;
           if (course.totalSessions && course.totalSessions > 0) {
             addTask(cls, course, workingDates, course.totalSessions, "total");
             return;
