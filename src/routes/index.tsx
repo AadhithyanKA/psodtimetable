@@ -252,6 +252,10 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
     color: rest.color || COLORS[0],
     durationSlots: cleanDurationSlots(rest.durationSlots, slots),
     weeklyPeriods: Math.max(0, Math.floor(rest.weeklyPeriods ?? 0)),
+    lectureHours: Math.max(0, Math.floor(rest.lectureHours ?? 0)) || undefined,
+    tutorialHours: Math.max(0, Math.floor(rest.tutorialHours ?? 0)) || undefined,
+    practicalHours: Math.max(0, Math.floor(rest.practicalHours ?? 0)) || undefined,
+    credits: Math.max(0, Math.floor(rest.credits ?? 0)) || undefined,
     totalSessions:
       rest.totalSessions === undefined || rest.totalSessions === null
         ? undefined
