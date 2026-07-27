@@ -1555,9 +1555,9 @@ function Index() {
     ];
     const wb = XLSX.utils.book_new();
     // Weeks come from each course's active range intersected with the actual
-    // timetable range. Lesson totals are split into theory/practical rows from
-    // the course target first; if a course is already placed on the timetable,
-    // those visible placements drive the ASC totals so export matches the grid.
+    // timetable range. Lesson totals are planned from LTPC/course totals and
+    // split across W1, W2... so Length × Lessons/week matches the full course
+    // requirement for the timetable being designed.
     state.classes.forEach((cls) => {
       const rows: (string | number)[][] = [header];
       cls.courses.forEach((course) => {
@@ -1579,17 +1579,6 @@ function Index() {
           ? theoryPerWeek * weekCount
           : Math.max(0, totalTarget || courseWeeklyTarget(course) * weekCount);
         const practicalTotal = hasLTPC ? P * weekCount : 0;
-        const range = effectiveCourseRange(course, state);
-        const courseDates = range ? daysBetween(range.from, range.to) : [];
-        const placedStarts = new Map<number, number[]>();
-        const placedTotal = countCourseSessionsInDates(cls.grid, course, state.slots, courseDates, (date, slotIdx) => {
-          const cycle = courseCycleForDate(course, state, date);
-          if (!cycle) return;
-          const list = placedStarts.get(cycle) ?? [];
-          list.push(slotIdx);
-          placedStarts.set(cycle, list);
-        });
-        const hasPlacedTimetable = placedTotal > 0;
         let weekly = courseWeeklyTarget(course);
         if (weekly <= 0 && (course.totalSessions ?? 0) > 0) {
           weekly = Math.max(1, course.totalSessions ?? 0);
@@ -1616,33 +1605,7 @@ function Index() {
             ]);
           });
         };
-        if (hasPlacedTimetable) {
-          const theoryRemaining = new Map<number, number>();
-          splitTotalAcrossWeeks(theoryTotal, weekCount).forEach((value, index) => theoryRemaining.set(index + 1, value));
-          const theoryPlaced = Array.from({ length: weekCount }, () => 0);
-          const practicalBlocksByLength = new Map<number, number[]>();
-          for (let week = 1; week <= weekCount; week++) {
-            const starts = [...(placedStarts.get(week) ?? [])].sort((a, b) => a - b);
-            starts.forEach(() => {
-              const remainingTheory = theoryRemaining.get(week) ?? 0;
-              if (remainingTheory > 0) {
-                theoryPlaced[week - 1]++;
-                theoryRemaining.set(week, remainingTheory - 1);
-              } else {
-                const length = Math.max(1, span);
-                const list = practicalBlocksByLength.get(length) ?? Array.from({ length: weekCount }, () => 0);
-                list[week - 1]++;
-                practicalBlocksByLength.set(length, list);
-              }
-            });
-          }
-          if (theoryPlaced.some((lessons) => lessons > 0) || !hasLTPC) {
-            emit(subjectName, hasLTPC ? 1 : span, theoryPlaced);
-          }
-          [...practicalBlocksByLength.entries()]
-            .sort(([a], [b]) => a - b)
-            .forEach(([length, lessons]) => emit(`${subjectName}_P`, length, lessons));
-        } else if (hasLTPC) {
+        if (hasLTPC) {
           const theoryLessons = splitTotalAcrossWeeks(theoryTotal, weekCount);
           const practicalPeriods = splitTotalAcrossWeeks(practicalTotal, weekCount);
           const practicalPairs = practicalPeriods.map((periods) => Math.floor(periods / 2));
