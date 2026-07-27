@@ -1459,7 +1459,7 @@ function Index() {
       "Lessons/week",
       "Available classrooms",
       "Cycle",
-      "",
+      "weight",
     ];
     const wb = XLSX.utils.book_new();
     // Cycle covers every week in the planning range (W1..Wn), not just W1.
@@ -1489,6 +1489,9 @@ function Index() {
         if (weekly <= 0 && L + T + P === 0) weekly = 1;
         const emit = (subjectCode: string, length: number, lessons: number) => {
           if (lessons <= 0) return;
+          const weight = Number.isFinite(lessons) && lessons > 0
+            ? Number((lessons / 18).toFixed(4))
+            : 0;
           // One row per week in the planning range.
           for (let w = 1; w <= weekCount; w++) {
             rows.push([
@@ -1501,7 +1504,7 @@ function Index() {
               lessons,
               classroom,
               `W${w}`,
-              "",
+              weight,
             ]);
           }
         };
@@ -1517,7 +1520,7 @@ function Index() {
       const ws = XLSX.utils.aoa_to_sheet(rows);
       ws["!cols"] = [
         { wch: 22 }, { wch: 10 }, { wch: 14 }, { wch: 14 },
-        { wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 22 }, { wch: 8 }, { wch: 10 },
+        { wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 22 }, { wch: 8 }, { wch: 10 }, { wch: 10 },
       ];
       const sheetName = `Data to Fill ${cls.name}`.slice(0, 31);
       XLSX.utils.book_append_sheet(wb, ws, sheetName);
