@@ -1520,7 +1520,7 @@ function Index() {
       const ws = XLSX.utils.aoa_to_sheet(rows);
       ws["!cols"] = [
         { wch: 22 }, { wch: 10 }, { wch: 14 }, { wch: 14 },
-        { wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 22 }, { wch: 8 }, { wch: 10 },
+        { wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 22 }, { wch: 8 }, { wch: 10 }, { wch: 10 },
       ];
       const sheetName = `Data to Fill ${cls.name}`.slice(0, 31);
       XLSX.utils.book_append_sheet(wb, ws, sheetName);
