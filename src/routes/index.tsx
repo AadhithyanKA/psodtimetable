@@ -225,7 +225,6 @@ const nonBreakCount = (slots: Slot[]) => slots.filter((slot) => !slot.isBreak).l
 // durationSlots, but we count them as P sessions per week to match the
 // semester model where LTPC × 15 weeks = total sessions).
 // Falls back to weeklyPeriods when no LTPC values are set.
-const LTPC_WEEKS = 15;
 const courseWeeklyTarget = (course: Course): number => {
   const L = Math.max(0, course.lectureHours ?? 0);
   const T = Math.max(0, course.tutorialHours ?? 0);
@@ -233,15 +232,33 @@ const courseWeeklyTarget = (course: Course): number => {
   if (L + T + P > 0) return L + T + P;
   return Math.max(0, course.weeklyPeriods ?? 0);
 };
-// Total sessions across the semester. Explicit totalSessions overrides;
-// otherwise LTPC → (L+T+P) × 15 weeks. Example: L=1,T=0,P=4 → 5 × 15 = 75
-// (15 theory + 60 practical).
-const courseTotalTarget = (course: Course): number => {
+// Number of calendar weeks covered by [from, to] inclusive (ceil days/7).
+const weeksInRange = (from?: string, to?: string): number => {
+  if (!from || !to) return 0;
+  const d1 = Date.parse(`${from}T00:00:00Z`);
+  const d2 = Date.parse(`${to}T00:00:00Z`);
+  if (!Number.isFinite(d1) || !Number.isFinite(d2) || d2 < d1) return 0;
+  const days = Math.floor((d2 - d1) / 86400000) + 1;
+  return Math.max(1, Math.ceil(days / 7));
+};
+// Weeks a course is scheduled over: its own from/to overrides state's range.
+const courseSemesterWeeks = (
+  course: Course,
+  state: { fromDate: string; toDate: string },
+): number => {
+  const from = course.fromDate || state.fromDate;
+  const to = course.toDate || state.toDate;
+  return weeksInRange(from, to);
+};
+// Total sessions across the course's active range. Explicit totalSessions
+// overrides; otherwise LTPC → (L+T+P) × weeks-in-range.
+// Example over 15 weeks: L=1,T=0,P=4 → 5 × 15 = 75 (15 theory + 60 practical).
+const courseTotalTarget = (course: Course, weeks: number): number => {
   if (course.totalSessions && course.totalSessions > 0) return course.totalSessions;
   const L = Math.max(0, course.lectureHours ?? 0);
   const T = Math.max(0, course.tutorialHours ?? 0);
   const P = Math.max(0, course.practicalHours ?? 0);
-  if (L + T + P > 0) return (L + T + P) * LTPC_WEEKS;
+  if (L + T + P > 0) return (L + T + P) * Math.max(0, weeks);
   return 0;
 };
 const cleanDurationSlots = (value: unknown, slots: Slot[]): number => {
@@ -1009,7 +1026,7 @@ function Index() {
       classes.forEach((cls) => {
         cls.courses.forEach((course) => {
           if (course.disabled) return;
-          const totalTarget = courseTotalTarget(course);
+          const totalTarget = courseTotalTarget(course, courseSemesterWeeks(course, s));
           if (totalTarget > 0) {
             addTask(cls, course, workingDates, totalTarget, "total");
             return;
@@ -1508,15 +1525,16 @@ function Index() {
       "weight",
     ];
     const wb = XLSX.utils.book_new();
-    // LTPC semester = 15 weeks. Total sessions per course = (L+T+P) × 15,
-    // so Cycle emits exactly 15 week-rows (W1..W15) regardless of the
-    // planning date range. This keeps ASC totals aligned with LTPC math
-    // (e.g. L=1,P=4 → 15 theory + 60 practical = 75).
-    const SEMESTER_WEEKS = 15;
-    const weekCount = SEMESTER_WEEKS;
+    // Weeks come from each course's active date range (or the global range
+    // when the course doesn't specify one). No 15-week cap: the Cycle column
+    // emits one W# row per week the course actually spans, so LTPC totals
+    // scale with the timetable duration (e.g. 20-week plan, L=1,P=4 → 20
+    // theory + 80 practical = 100).
     state.classes.forEach((cls) => {
       const rows: (string | number)[][] = [header];
       cls.courses.forEach((course) => {
+        const weekCount = courseSemesterWeeks(course, state);
+        if (weekCount <= 0) return;
         const teacher = course.faculty || "";
         const className = cls.name;
         const group = "Entire class";
@@ -1666,7 +1684,7 @@ function Index() {
     };
     const planFor = (cls: ClassData) =>
       cls.courses.reduce((sum, c) => {
-        const totalT = courseTotalTarget(c);
+        const totalT = courseTotalTarget(c, courseSemesterWeeks(c, state));
         const requested = totalT > 0 ? totalT : courseWeeklyTarget(c) * weekCount;
         const capacity = countCourseRuleCapacity(c, state.slots, dates);
         if (requested <= 0) return sum + capacity;
@@ -1941,7 +1959,7 @@ function Index() {
                     <div className="px-3 pb-2">
                       {(() => {
                         const placed = coursePlacementCounts.get(c.id) ?? 0;
-                        const target = courseTotalTarget(c);
+                         const target = courseTotalTarget(c, courseSemesterWeeks(c, state));
                         const pct =
                           target > 0 ? Math.min(100, Math.round((placed / target) * 100)) : 0;
                         const done = target > 0 && placed >= target;
@@ -2906,7 +2924,7 @@ function Index() {
                           style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                         >
                           {(() => {
-                            const t = courseTotalTarget(c);
+                            const t = courseTotalTarget(c, courseSemesterWeeks(c, state));
                             return t > 0
                               ? `${placedForCourse} / ${t} sessions`
                               : `${placedForCourse} placed · no total set`;
