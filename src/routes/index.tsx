@@ -286,10 +286,17 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
     tutorialHours: Math.max(0, Math.floor(rest.tutorialHours ?? 0)) || undefined,
     practicalHours: Math.max(0, Math.floor(rest.practicalHours ?? 0)) || undefined,
     credits: Math.max(0, Math.floor(rest.credits ?? 0)) || undefined,
-    totalSessions:
-      rest.totalSessions === undefined || rest.totalSessions === null
-        ? undefined
-        : Math.max(0, Math.floor(rest.totalSessions)) || undefined,
+    // LTPC upgrade: if LTPC is set, we always re-derive totalSessions from
+    // (L+T+P) × 15 so old save files pick up the latest formula. Explicit
+    // totalSessions is only preserved when no LTPC values exist.
+    totalSessions: (() => {
+      const L = Math.max(0, Math.floor(rest.lectureHours ?? 0));
+      const T = Math.max(0, Math.floor(rest.tutorialHours ?? 0));
+      const P = Math.max(0, Math.floor(rest.practicalHours ?? 0));
+      if (L + T + P > 0) return undefined;
+      if (rest.totalSessions === undefined || rest.totalSessions === null) return undefined;
+      return Math.max(0, Math.floor(rest.totalSessions)) || undefined;
+    })(),
     allowedWeekdays: (rest.allowedWeekdays ?? []).filter((day) => day >= 0 && day <= 6),
     allowedSlots: rawAllowedSlots.filter((idx) => idx >= 0 && idx < slots.length && !slots[idx].isBreak),
     allowedSlotsByWeekday: allowedByWd,
@@ -1395,7 +1402,14 @@ function Index() {
         else if (cell.kind === "blocked") row.push(`Blocked: ${cell.label}`);
         else if (cell.kind === "course") {
           const c = cls.courses.find((x) => x.id === cell.courseId);
-          row.push(c ? `${c.name} (${c.faculty})` : "");
+          if (!c) { row.push(""); }
+          else {
+            const P = Math.max(0, c.practicalHours ?? 0);
+            const LT = Math.max(0, c.lectureHours ?? 0) + Math.max(0, c.tutorialHours ?? 0);
+            const isPractical = P > 0 && (LT === 0 || (c.durationSlots ?? 1) >= 2);
+            const code = isPractical ? `${c.name}_P` : c.name;
+            row.push(`${code} (${c.faculty})`);
+          }
         } else row.push("");
       });
       rows.push(row);
@@ -1540,11 +1554,19 @@ function Index() {
             ]);
           }
         };
+        // LTPC semester model: total slots/week = L + T + P.
+        // Practicals are typically 2-period blocks, so a P count of practical
+        // slots/week is emitted as Length=2 with Lessons/week = ceil(P/2).
+        // If P is odd we emit an extra single-period practical row.
         if (P > 0 && L + T > 0) {
           emit(subjectName, span, L + T);
-          emit(`${subjectName}_P`, 2, 2 * P);
+          const pairs = Math.floor(P / 2);
+          if (pairs > 0) emit(`${subjectName}_P`, 2, pairs);
+          if (P % 2 === 1) emit(`${subjectName}_P`, 1, 1);
         } else if (P > 0) {
-          emit(`${subjectName}_P`, 2, 2 * P);
+          const pairs = Math.floor(P / 2);
+          if (pairs > 0) emit(`${subjectName}_P`, 2, pairs);
+          if (P % 2 === 1) emit(`${subjectName}_P`, 1, 1);
         } else {
           emit(subjectName, span, weekly);
         }
