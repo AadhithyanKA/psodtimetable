@@ -516,6 +516,10 @@ function Index() {
   }, [state, dates]);
 
   const applyTool = (date: string, slotIdx: number, tool: Tool) => {
+    if (state.frozen) {
+      setAutoFillReport("Timetable is frozen — unfreeze to make changes.");
+      return;
+    }
     if (tool.kind === "course") {
       const active = state.classes.find((c) => c.id === activeClassId);
       const course = active?.courses.find((c) => c.id === tool.courseId);
