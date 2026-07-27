@@ -1554,11 +1554,19 @@ function Index() {
             ]);
           }
         };
+        // LTPC semester model: total slots/week = L + T + P.
+        // Practicals are typically 2-period blocks, so a P count of practical
+        // slots/week is emitted as Length=2 with Lessons/week = ceil(P/2).
+        // If P is odd we emit an extra single-period practical row.
         if (P > 0 && L + T > 0) {
           emit(subjectName, span, L + T);
-          emit(`${subjectName}_P`, 2, 2 * P);
+          const pairs = Math.floor(P / 2);
+          if (pairs > 0) emit(`${subjectName}_P`, 2, pairs);
+          if (P % 2 === 1) emit(`${subjectName}_P`, 1, 1);
         } else if (P > 0) {
-          emit(`${subjectName}_P`, 2, 2 * P);
+          const pairs = Math.floor(P / 2);
+          if (pairs > 0) emit(`${subjectName}_P`, 2, pairs);
+          if (P % 2 === 1) emit(`${subjectName}_P`, 1, 1);
         } else {
           emit(subjectName, span, weekly);
         }
