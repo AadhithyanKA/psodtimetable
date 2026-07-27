@@ -1541,12 +1541,11 @@ function Index() {
     });
   };
   const exportASC = () => {
-    // aSc TimeTables "Data to Fill" import workbook. One sheet per class,
-    // with theory rows as course code and practical rows as coursecode_P.
-    // Lessons/week is based on the ACTUAL sessions placed on the timetable
-    // for each course, grouped per calendar week (W1, W2 ...). Theory =
-    // single-slot placements (Length 1). Practical = multi-slot placements
-    // (Length equals the course span, typically 2).
+    // aSc TimeTables "Data to Fill" import workbook. One sheet per class.
+    // Lessons/week is the actual number of occupied timetable periods in each
+    // week. LTPC is used only to split those placed periods into theory rows
+    // (course code) and practical rows (coursecode_P), so totals match the
+    // designed timetable exactly.
     const header = [
       "Teacher",
       "Class",
@@ -1568,34 +1567,12 @@ function Index() {
         const group = "Entire class";
         const subjectName = course.name;
         const classroom = course.classroom || "";
-        // Walk the grid and tally actual placed session starts per week,
-        // keyed by length (span). Theory placements are Length=1, practical
-        // placements are Length>=2.
-        // key: `${weekIndex}|${length}` -> count
-        const perWeekByLength = new Map<string, number>();
-        let maxWeek = 0;
+        const placedPeriodsByWeek = new Map<number, number>();
         dates.forEach((date) => {
-          let slotIdx = 0;
-          while (slotIdx < state.slots.length) {
+          state.slots.forEach((slot, slotIdx) => {
+            if (slot.isBreak) return;
             const cell = cls.grid[`${date}-${slotIdx}`];
-            if (cell?.kind !== "course" || cell.courseId !== course.id) {
-              slotIdx++;
-              continue;
-            }
-            // Measure contiguous span of this course starting here
-            let len = 0;
-            while (
-              slotIdx + len < state.slots.length &&
-              !state.slots[slotIdx + len]?.isBreak
-            ) {
-              const part = cls.grid[`${date}-${slotIdx + len}`];
-              if (part?.kind !== "course" || part.courseId !== course.id) break;
-              len++;
-            }
-            if (len <= 0) {
-              slotIdx++;
-              continue;
-            }
+            if (cell?.kind !== "course" || cell.courseId !== course.id) return;
             const cycle =
               courseCycleForDate(course, state, date) ??
               (() => {
@@ -1605,28 +1582,43 @@ function Index() {
                 if (!start || !cur) return 1;
                 return Math.floor((cur.getTime() - start.getTime()) / (7 * 86400000)) + 1;
               })();
-            if (cycle > maxWeek) maxWeek = cycle;
-            const key = `${cycle}|${len}`;
-            perWeekByLength.set(key, (perWeekByLength.get(key) ?? 0) + 1);
-            slotIdx += len;
-          }
+            placedPeriodsByWeek.set(cycle, (placedPeriodsByWeek.get(cycle) ?? 0) + 1);
+          });
         });
-        if (perWeekByLength.size === 0) return;
-        // Emit rows grouped by (length, week). Theory (len 1) uses subject name;
-        // practical (len >= 2) uses `${name}_P`.
-        const sortedKeys = Array.from(perWeekByLength.keys()).sort((a, b) => {
-          const [wa, la] = a.split("|").map(Number);
-          const [wb2, lb] = b.split("|").map(Number);
-          if (wa !== wb2) return wa - wb2;
-          return la - lb;
-        });
-        sortedKeys.forEach((key) => {
-          const lessons = perWeekByLength.get(key) ?? 0;
+        if (placedPeriodsByWeek.size === 0) return;
+
+        const totalPlacedPeriods = Array.from(placedPeriodsByWeek.values()).reduce((sum, value) => sum + value, 0);
+        const theoryUnits = Math.max(0, (course.lectureHours ?? 0) + (course.tutorialHours ?? 0));
+        const practicalUnits = Math.max(0, course.practicalHours ?? 0);
+        const totalLtpUnits = theoryUnits + practicalUnits;
+        const desiredTheoryPeriods = totalLtpUnits > 0
+          ? Math.min(totalPlacedPeriods, Math.round((totalPlacedPeriods * theoryUnits) / totalLtpUnits))
+          : totalPlacedPeriods;
+
+        const weekEntries = Array.from(placedPeriodsByWeek.entries()).sort(([a], [b]) => a - b);
+        const theoryByWeek = new Map<number, number>();
+        if (desiredTheoryPeriods > 0) {
+          const weighted = weekEntries.map(([cycle, periods]) => {
+            const exact = totalPlacedPeriods > 0 ? (periods * desiredTheoryPeriods) / totalPlacedPeriods : 0;
+            const base = Math.min(periods, Math.floor(exact));
+            return { cycle, periods, base, fraction: exact - base };
+          });
+          let assigned = weighted.reduce((sum, item) => sum + item.base, 0);
+          weighted.forEach((item) => theoryByWeek.set(item.cycle, item.base));
+          weighted
+            .slice()
+            .sort((a, b) => b.fraction - a.fraction || a.cycle - b.cycle)
+            .forEach((item) => {
+              if (assigned >= desiredTheoryPeriods) return;
+              const current = theoryByWeek.get(item.cycle) ?? 0;
+              if (current >= item.periods) return;
+              theoryByWeek.set(item.cycle, current + 1);
+              assigned++;
+            });
+        }
+
+        const addRow = (subjectCode: string, cycle: number, lessons: number) => {
           if (lessons <= 0) return;
-          const [cycleStr, lenStr] = key.split("|");
-          const cycle = Number(cycleStr);
-          const length = Number(lenStr);
-          const subjectCode = length >= 2 ? `${subjectName}_P` : subjectName;
           const weight = Number((lessons / 18).toFixed(4));
           rows.push([
             teacher,
@@ -1634,12 +1626,19 @@ function Index() {
             group,
             subjectCode,
             subjectName,
-            length,
+            1,
             lessons,
             classroom,
             `W${cycle}`,
             weight,
           ]);
+        };
+
+        weekEntries.forEach(([cycle, placedPeriods]) => {
+          const theoryLessons = Math.min(placedPeriods, theoryByWeek.get(cycle) ?? 0);
+          const practicalLessons = Math.max(0, placedPeriods - theoryLessons);
+          addRow(subjectName, cycle, theoryLessons);
+          addRow(`${subjectName}_P`, cycle, practicalLessons);
         });
       });
       const ws = XLSX.utils.aoa_to_sheet(rows);
