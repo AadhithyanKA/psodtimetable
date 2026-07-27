@@ -35,6 +35,7 @@ type Course = {
   id: string;
   name: string;
   faculty: string;
+  classroom?: string;
   color: string;
   durationSlots: number;
   // Target number of sessions per week (used by auto-fill). 0 = don't auto-fill.
@@ -240,6 +241,7 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
     id: rest.id || `c${Date.now()}`,
     name: rest.name || "New Course",
     faculty: rest.faculty || "Faculty",
+    classroom: typeof rest.classroom === "string" ? rest.classroom : "",
     color: rest.color || COLORS[0],
     durationSlots: cleanDurationSlots(rest.durationSlots, slots),
     weeklyPeriods: Math.max(0, Math.floor(rest.weeklyPeriods ?? 0)),
@@ -665,6 +667,7 @@ function Index() {
               id: `c${Date.now()}`,
               name: "New Course",
               faculty: "Faculty",
+              classroom: "",
               color: COLORS[cls.courses.length % COLORS.length],
               durationSlots: 1,
               weeklyPeriods: 3,
@@ -1474,7 +1477,9 @@ function Index() {
     if (cell.kind === "blocked") return { text: cell.label, bg: "#e5e7eb", fg: "#374151" };
     const course = courses.find((c) => c.id === cell.courseId);
     return {
-      text: course ? `${course.name}\n${course.faculty}` : "?",
+      text: course
+        ? `${course.name}\n${course.faculty}${course.classroom ? ` · ${course.classroom}` : ""}`
+        : "?",
       bg: course?.color ?? "#ddd",
       fg: "#1f2937",
     };
@@ -1663,6 +1668,14 @@ function Index() {
                         onChange={(e) => updateCourse(c.id, { faculty: e.target.value })}
                         placeholder="Faculty"
                         className="min-w-0 border-b border-dashed border-[#0d0d0d]/20 bg-transparent text-xs text-[#2d2d2d]/70 outline-none focus:border-[#0d0d0d]"
+                      />
+                      <input
+                        value={c.classroom ?? ""}
+                        onChange={(e) => updateCourse(c.id, { classroom: e.target.value })}
+                        placeholder="Room"
+                        title="Classroom / room name"
+                        className="col-span-2 min-w-0 border-b border-dashed border-[#0d0d0d]/20 bg-transparent text-xs text-[#2d2d2d]/70 outline-none focus:border-[#0d0d0d]"
+                        style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       />
                       <label
                         className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
