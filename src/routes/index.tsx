@@ -220,15 +220,29 @@ type SavedState = Partial<Omit<State, "classes">> & {
 };
 
 const nonBreakCount = (slots: Slot[]) => slots.filter((slot) => !slot.isBreak).length;
-// LTPC-derived weekly session target. 1 L or T hour = 1 session; 1 P hour = 2
-// sessions (practicals are double periods). Falls back to weeklyPeriods when
-// no LTPC values are set.
+// LTPC-derived weekly session target. Each unit of L, T, or P contributes
+// 1 session/week (P slots are still typically 2 consecutive periods via
+// durationSlots, but we count them as P sessions per week to match the
+// semester model where LTPC × 15 weeks = total sessions).
+// Falls back to weeklyPeriods when no LTPC values are set.
+const LTPC_WEEKS = 15;
 const courseWeeklyTarget = (course: Course): number => {
   const L = Math.max(0, course.lectureHours ?? 0);
   const T = Math.max(0, course.tutorialHours ?? 0);
   const P = Math.max(0, course.practicalHours ?? 0);
-  if (L + T + P > 0) return L + T + 2 * P;
+  if (L + T + P > 0) return L + T + P;
   return Math.max(0, course.weeklyPeriods ?? 0);
+};
+// Total sessions across the semester. Explicit totalSessions overrides;
+// otherwise LTPC → (L+T+P) × 15 weeks. Example: L=1,T=0,P=4 → 5 × 15 = 75
+// (15 theory + 60 practical).
+const courseTotalTarget = (course: Course): number => {
+  if (course.totalSessions && course.totalSessions > 0) return course.totalSessions;
+  const L = Math.max(0, course.lectureHours ?? 0);
+  const T = Math.max(0, course.tutorialHours ?? 0);
+  const P = Math.max(0, course.practicalHours ?? 0);
+  if (L + T + P > 0) return (L + T + P) * LTPC_WEEKS;
+  return 0;
 };
 const cleanDurationSlots = (value: unknown, slots: Slot[]): number => {
   const parsed = typeof value === "number" ? value : parseInt(String(value ?? "1"), 10);
@@ -988,8 +1002,9 @@ function Index() {
       classes.forEach((cls) => {
         cls.courses.forEach((course) => {
           if (course.disabled) return;
-          if (course.totalSessions && course.totalSessions > 0) {
-            addTask(cls, course, workingDates, course.totalSessions, "total");
+          const totalTarget = courseTotalTarget(course);
+          if (totalTarget > 0) {
+            addTask(cls, course, workingDates, totalTarget, "total");
             return;
           }
           weeks.forEach((weekDates, key) => {
@@ -1631,9 +1646,8 @@ function Index() {
     };
     const planFor = (cls: ClassData) =>
       cls.courses.reduce((sum, c) => {
-        const requested = c.totalSessions && c.totalSessions > 0
-          ? c.totalSessions
-          : courseWeeklyTarget(c) * weekCount;
+        const totalT = courseTotalTarget(c);
+        const requested = totalT > 0 ? totalT : courseWeeklyTarget(c) * weekCount;
         const capacity = countCourseRuleCapacity(c, state.slots, dates);
         if (requested <= 0) return sum + capacity;
         return sum + Math.min(requested, capacity);
@@ -1862,7 +1876,7 @@ function Index() {
                         <span title="Consecutive periods per session">span</span>
                       </label>
                       <label
-                        title="Sessions per week (auto-fill target). Derived from LTPC (L+T+2P) when any of L/T/P is set."
+                        title="Sessions per week (auto-fill target). Derived from LTPC (L+T+P) when any of L/T/P is set. Total across semester = (L+T+P) × 15 weeks."
                         className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
@@ -1886,7 +1900,7 @@ function Index() {
                         <span>/wk</span>
                       </label>
                       <label
-                        title="Total sessions across the whole date range. Overrides /wk when set."
+                        title="Total sessions across the whole date range. Auto-derived from LTPC as (L+T+P) × 15 when blank; type a value to override."
                         className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
@@ -1907,10 +1921,7 @@ function Index() {
                     <div className="px-3 pb-2">
                       {(() => {
                         const placed = coursePlacementCounts.get(c.id) ?? 0;
-                        const target =
-                          (c.totalSessions ?? 0) > 0
-                            ? (c.totalSessions as number)
-                            : 0;
+                        const target = courseTotalTarget(c);
                         const pct =
                           target > 0 ? Math.min(100, Math.round((placed / target) * 100)) : 0;
                         const done = target > 0 && placed >= target;
@@ -2874,9 +2885,12 @@ function Index() {
                           className="mt-0.5 block text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/70"
                           style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                         >
-                          {c.totalSessions && c.totalSessions > 0
-                            ? `${placedForCourse} / ${c.totalSessions} sessions`
-                            : `${placedForCourse} placed · no total set`}
+                          {(() => {
+                            const t = courseTotalTarget(c);
+                            return t > 0
+                              ? `${placedForCourse} / ${t} sessions`
+                              : `${placedForCourse} placed · no total set`;
+                          })()}
                         </span>
                       </span>
                       {!allowed && (
