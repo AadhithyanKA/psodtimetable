@@ -1876,7 +1876,7 @@ function Index() {
                         <span title="Consecutive periods per session">span</span>
                       </label>
                       <label
-                        title="Sessions per week (auto-fill target). Derived from LTPC (L+T+2P) when any of L/T/P is set."
+                        title="Sessions per week (auto-fill target). Derived from LTPC (L+T+P) when any of L/T/P is set. Total across semester = (L+T+P) × 15 weeks."
                         className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
@@ -1900,7 +1900,7 @@ function Index() {
                         <span>/wk</span>
                       </label>
                       <label
-                        title="Total sessions across the whole date range. Overrides /wk when set."
+                        title="Total sessions across the whole date range. Auto-derived from LTPC as (L+T+P) × 15 when blank; type a value to override."
                         className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
@@ -1921,10 +1921,7 @@ function Index() {
                     <div className="px-3 pb-2">
                       {(() => {
                         const placed = coursePlacementCounts.get(c.id) ?? 0;
-                        const target =
-                          (c.totalSessions ?? 0) > 0
-                            ? (c.totalSessions as number)
-                            : 0;
+                        const target = courseTotalTarget(c);
                         const pct =
                           target > 0 ? Math.min(100, Math.round((placed / target) * 100)) : 0;
                         const done = target > 0 && placed >= target;
