@@ -72,6 +72,9 @@ type State = {
   toDate: string;
   slots: Slot[];
   classes: ClassData[];
+  // When true, the timetable is locked: no edits, no auto-fill, and
+  // conflict/override warnings are suppressed so overrides become permanent.
+  frozen?: boolean;
 };
 
 const COLORS = [
@@ -303,6 +306,7 @@ const normalizeStateSnapshot = (snapshot: SavedState): State => {
     toDate: snapshot.toDate || base.toDate,
     slots,
     classes,
+    frozen: Boolean(snapshot.frozen),
   };
 };
 
@@ -486,6 +490,7 @@ function Index() {
   // Conflict detection across classes
   const conflicts = useMemo(() => {
     const set = new Set<string>();
+    if (state.frozen) return set;
     dates.forEach((date) => {
       state.slots.forEach((_, i) => {
         const key = `${date}-${i}`;
@@ -511,6 +516,10 @@ function Index() {
   }, [state, dates]);
 
   const applyTool = (date: string, slotIdx: number, tool: Tool) => {
+    if (state.frozen) {
+      setAutoFillReport("Timetable is frozen — unfreeze to make changes.");
+      return;
+    }
     if (tool.kind === "course") {
       const active = state.classes.find((c) => c.id === activeClassId);
       const course = active?.courses.find((c) => c.id === tool.courseId);
@@ -604,6 +613,10 @@ function Index() {
   };
 
   const clearTimetable = () => {
+    if (state.frozen) {
+      setAutoFillReport("Timetable is frozen — unfreeze to clear.");
+      return;
+    }
     if (!confirm("Clear every course assignment from all classes? Breaks and blocked slots will stay.")) return;
     setState((s) => ({
       ...s,
@@ -1205,6 +1218,10 @@ function Index() {
     label: string,
     opts: { overwrite: boolean; strictRules?: boolean }
   ) => {
+    if (state.frozen) {
+      setAutoFillReport("Timetable is frozen — unfreeze to run auto-fill.");
+      return;
+    }
     setAutoStatus({ label, phase: "Preparing…" });
     // Yield twice so the overlay paints before the synchronous solver runs.
     requestAnimationFrame(() => {
@@ -2736,6 +2753,30 @@ function Index() {
               {overrideMode && (
                 <span className="text-[10px] font-semibold text-red-700">
                   Rules & faculty conflicts bypassed for manual placement
+                </span>
+              )}
+              <span className="mx-1 h-6 w-px bg-[#0d0d0d]/20" />
+              <button
+                onClick={() => {
+                  if (!state.frozen) {
+                    if (!confirm("Freeze the timetable? This locks all cells, hides conflict warnings, and makes overrides permanent. You can unfreeze later.")) return;
+                  }
+                  setState((s) => ({ ...s, frozen: !s.frozen }));
+                }}
+                className={
+                  "flex items-center gap-2 border-2 px-2 py-1 text-[11px] font-bold uppercase tracking-wider transition " +
+                  (state.frozen
+                    ? "border-sky-700 bg-sky-600 text-white shadow-[2px_2px_0px_0px_#0d0d0d]"
+                    : "border-[#0d0d0d]/60 bg-white hover:border-[#0d0d0d]")
+                }
+                title="Lock the timetable, hide conflict warnings, and make overrides permanent"
+              >
+                <span aria-hidden>{state.frozen ? "🔒" : "❄"}</span>
+                {state.frozen ? "Frozen — Unfreeze" : "Freeze"}
+              </button>
+              {state.frozen && (
+                <span className="text-[10px] font-semibold text-sky-700">
+                  Timetable locked · overrides permanent
                 </span>
               )}
             </div>
