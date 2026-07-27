@@ -510,14 +510,14 @@ function Index() {
     if (tool.kind === "course") {
       const active = state.classes.find((c) => c.id === activeClassId);
       const course = active?.courses.find((c) => c.id === tool.courseId);
-      if (!active || !course || !courseAllowedOn(course, date)) {
+      if (!active || !course || (!overrideMode && !courseAllowedOn(course, date))) {
         setAutoFillReport("Cannot place course — this date is outside its rules.");
         return;
       }
       const span = cleanDurationSlots(course.durationSlots, state.slots);
       for (let k = 0; k < span; k++) {
         const idx = slotIdx + k;
-        if (idx >= state.slots.length || state.slots[idx]?.isBreak || !courseAllowedSlotOn(course, idx, date)) {
+        if (idx >= state.slots.length || state.slots[idx]?.isBreak || (!overrideMode && !courseAllowedSlotOn(course, idx, date))) {
           setAutoFillReport("Cannot place course — the full session must fit only inside selected rule periods.");
           return;
         }
@@ -529,7 +529,7 @@ function Index() {
           const otherCourse = cls.courses.find((c) => c.id === cell.courseId);
           return otherCourse?.faculty === course.faculty;
         });
-        if (facultyBusy) {
+        if (facultyBusy && !overrideMode) {
           setAutoFillReport("Cannot place course — this faculty is already assigned in another class at that time.");
           return;
         }
@@ -552,7 +552,7 @@ function Index() {
           if (s.slots[idx].isBreak) continue; // never write into break slots
           if (tool.kind === "course") {
             const course = cls.courses.find((c) => c.id === tool.courseId);
-            if (course && !courseAllowedSlotOn(course, idx, date)) continue;
+            if (course && !overrideMode && !courseAllowedSlotOn(course, idx, date)) continue;
           }
           const key = `${date}-${idx}`;
           if (tool.kind === "erase") delete grid[key];
