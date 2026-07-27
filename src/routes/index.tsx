@@ -897,6 +897,7 @@ function Index() {
             byFaculty.forEach((busyClasses) => {
               if (busyClasses.length < 2) return;
               busyClasses.forEach((cls) => {
+                if (!mutableClasses.includes(cls)) return;
                 const cell = cls.grid[key];
                 if (cell?.kind !== "course") return;
                 delete cls.grid[key];
