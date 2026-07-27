@@ -388,6 +388,7 @@ function Index() {
   const [picker, setPicker] = useState<{ date: string; slotIdx: number } | null>(null);
   const [armedTool, setArmedTool] = useState<Tool | null>(null);
   const [isPainting, setIsPainting] = useState(false);
+  const [overrideMode, setOverrideMode] = useState(false);
   const [rulesFor, setRulesFor] = useState<string | null>(null); // courseId in activeClass
   const [bulkWeekdays, setBulkWeekdays] = useState<number[]>([]);
   const [bulkSlots, setBulkSlots] = useState<number[]>([]);
