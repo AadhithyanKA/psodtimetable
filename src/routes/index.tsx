@@ -62,6 +62,8 @@ type Course = {
   // Optional active date range for this course. Undefined = entire timetable range.
   fromDate?: string; // YYYY-MM-DD
   toDate?: string; // YYYY-MM-DD
+  // When true, the course is skipped by Fill by Rules / auto-populate.
+  disabled?: boolean;
 };
 type ClassData = { id: string; name: string; grid: Record<string, Cell>; courses: Course[] };
 type Slot = { start: string; end: string; isBreak?: boolean }; // 24h "HH:MM"
