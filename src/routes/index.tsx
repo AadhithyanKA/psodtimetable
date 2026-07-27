@@ -334,16 +334,12 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
     tutorialHours: Math.max(0, Math.floor(rest.tutorialHours ?? 0)) || undefined,
     practicalHours: Math.max(0, Math.floor(rest.practicalHours ?? 0)) || undefined,
     credits: Math.max(0, Math.floor(rest.credits ?? 0)) || undefined,
-    // LTPC upgrade: if LTPC is set, we always re-derive totalSessions from
-    // (L+T+P) × 15 so old save files pick up the latest formula. Explicit
-    // totalSessions is only preserved when no LTPC values exist.
+    // Explicit totalSessions always wins as an override. When it's blank we
+    // fall back to the LTPC-derived total via courseTotalTarget().
     totalSessions: (() => {
-      const L = Math.max(0, Math.floor(rest.lectureHours ?? 0));
-      const T = Math.max(0, Math.floor(rest.tutorialHours ?? 0));
-      const P = Math.max(0, Math.floor(rest.practicalHours ?? 0));
-      if (L + T + P > 0) return undefined;
       if (rest.totalSessions === undefined || rest.totalSessions === null) return undefined;
-      return Math.max(0, Math.floor(rest.totalSessions)) || undefined;
+      const n = Math.max(0, Math.floor(rest.totalSessions));
+      return n > 0 ? n : undefined;
     })(),
     allowedWeekdays: (rest.allowedWeekdays ?? []).filter((day) => day >= 0 && day <= 6),
     allowedSlots: rawAllowedSlots.filter((idx) => idx >= 0 && idx < slots.length && !slots[idx].isBreak),
