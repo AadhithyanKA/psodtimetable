@@ -394,6 +394,7 @@ function Index() {
   const [bulkSlots, setBulkSlots] = useState<number[]>([]);
   const [bulkAllClasses, setBulkAllClasses] = useState(false);
   const [autoFillReport, setAutoFillReport] = useState<string>("");
+  const [autoStatus, setAutoStatus] = useState<{ label: string; phase: string } | null>(null);
   const [pendingScrollClassId, setPendingScrollClassId] = useState<string | null>(null);
   const [pendingBlockCsv, setPendingBlockCsv] = useState<{ name: string; text: string } | null>(null);
   const [blockReport, setBlockReport] = useState<string>("");
@@ -1193,6 +1194,25 @@ function Index() {
       });
 
       return { ...s, classes };
+    });
+  };
+
+  const runAutoPopulate = (
+    label: string,
+    opts: { overwrite: boolean; strictRules?: boolean }
+  ) => {
+    setAutoStatus({ label, phase: "Preparing…" });
+    // Yield twice so the overlay paints before the synchronous solver runs.
+    requestAnimationFrame(() => {
+      setAutoStatus({ label, phase: "Placing sessions…" });
+      requestAnimationFrame(() => {
+        try {
+          autoPopulate(opts);
+        } finally {
+          setAutoStatus({ label, phase: "Finalizing…" });
+          setTimeout(() => setAutoStatus(null), 350);
+        }
+      });
     });
   };
 
@@ -2064,15 +2084,15 @@ function Index() {
                 Fill by Rules uses every allowed weekday and period opportunity.
               </p>
               <div className="mb-3 grid grid-cols-2 gap-1">
-                <button
-                  onClick={() => autoPopulate({ overwrite: false })}
+                 <button
+                   onClick={() => runAutoPopulate("Fill Empty", { overwrite: false })}
                   className="border-2 border-[#0d0d0d] bg-white px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
                 >
                   Fill Empty
                 </button>
                 <button
                   onClick={() => {
-                    if (confirm("Clear all courses and re-generate?")) autoPopulate({ overwrite: true });
+                    if (confirm("Clear all courses and re-generate?")) runAutoPopulate("Regenerate", { overwrite: true });
                   }}
                   className="border-2 border-[#0d0d0d] bg-[#0d0d0d] px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#f5f3ee] hover:opacity-90"
                 >
@@ -2081,7 +2101,7 @@ function Index() {
               </div>
               <div className="mb-3 grid grid-cols-2 gap-1">
                 <button
-                  onClick={() => autoPopulate({ overwrite: false, strictRules: true })}
+                   onClick={() => runAutoPopulate("Fill by Rules", { overwrite: false, strictRules: true })}
                   className="border-2 border-[#0d0d0d] bg-amber-200 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-amber-300"
                   title="Places courses in their rule periods. If /wk is 0, uses every allowed period opportunity."
                 >
@@ -2090,7 +2110,7 @@ function Index() {
                 <button
                   onClick={() => {
                     if (confirm("Clear all courses and fill only by course rules?")) {
-                      autoPopulate({ overwrite: true, strictRules: true });
+                       runAutoPopulate("Regen Rules", { overwrite: true, strictRules: true });
                     }
                   }}
                   className="border-2 border-[#0d0d0d] bg-amber-300 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-amber-400"
@@ -3127,6 +3147,21 @@ function Index() {
           </div>
         );
       })()}
+      {autoStatus && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0d0d0d]/60 backdrop-blur-sm">
+          <div className="w-[min(420px,90vw)] border-2 border-[#0d0d0d] bg-[#f5f3ee] p-5 shadow-[6px_6px_0_#0d0d0d]">
+            <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[#2d2d2d]/70">
+              Auto-fill
+            </div>
+            <div className="mb-3 text-lg font-bold text-[#0d0d0d]">{autoStatus.label}</div>
+            <div className="mb-2 h-2 w-full overflow-hidden border-2 border-[#0d0d0d] bg-white">
+              <div className="h-full w-1/3 animate-[autofill_1.1s_ease-in-out_infinite] bg-amber-400" />
+            </div>
+            <div className="text-[11px] text-[#2d2d2d]/80">{autoStatus.phase}</div>
+          </div>
+          <style>{`@keyframes autofill{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}`}</style>
+        </div>
+      )}
     </div>
   );
 }
