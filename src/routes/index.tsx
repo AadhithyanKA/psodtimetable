@@ -2755,6 +2755,30 @@ function Index() {
                   Rules & faculty conflicts bypassed for manual placement
                 </span>
               )}
+              <span className="mx-1 h-6 w-px bg-[#0d0d0d]/20" />
+              <button
+                onClick={() => {
+                  if (!state.frozen) {
+                    if (!confirm("Freeze the timetable? This locks all cells, hides conflict warnings, and makes overrides permanent. You can unfreeze later.")) return;
+                  }
+                  setState((s) => ({ ...s, frozen: !s.frozen }));
+                }}
+                className={
+                  "flex items-center gap-2 border-2 px-2 py-1 text-[11px] font-bold uppercase tracking-wider transition " +
+                  (state.frozen
+                    ? "border-sky-700 bg-sky-600 text-white shadow-[2px_2px_0px_0px_#0d0d0d]"
+                    : "border-[#0d0d0d]/60 bg-white hover:border-[#0d0d0d]")
+                }
+                title="Lock the timetable, hide conflict warnings, and make overrides permanent"
+              >
+                <span aria-hidden>{state.frozen ? "🔒" : "❄"}</span>
+                {state.frozen ? "Frozen — Unfreeze" : "Freeze"}
+              </button>
+              {state.frozen && (
+                <span className="text-[10px] font-semibold text-sky-700">
+                  Timetable locked · overrides permanent
+                </span>
+              )}
             </div>
           </div>
         </main>
