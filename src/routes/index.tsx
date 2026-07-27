@@ -1002,8 +1002,9 @@ function Index() {
       classes.forEach((cls) => {
         cls.courses.forEach((course) => {
           if (course.disabled) return;
-          if (course.totalSessions && course.totalSessions > 0) {
-            addTask(cls, course, workingDates, course.totalSessions, "total");
+          const totalTarget = courseTotalTarget(course);
+          if (totalTarget > 0) {
+            addTask(cls, course, workingDates, totalTarget, "total");
             return;
           }
           weeks.forEach((weekDates, key) => {
@@ -1645,9 +1646,8 @@ function Index() {
     };
     const planFor = (cls: ClassData) =>
       cls.courses.reduce((sum, c) => {
-        const requested = c.totalSessions && c.totalSessions > 0
-          ? c.totalSessions
-          : courseWeeklyTarget(c) * weekCount;
+        const totalT = courseTotalTarget(c);
+        const requested = totalT > 0 ? totalT : courseWeeklyTarget(c) * weekCount;
         const capacity = countCourseRuleCapacity(c, state.slots, dates);
         if (requested <= 0) return sum + capacity;
         return sum + Math.min(requested, capacity);
