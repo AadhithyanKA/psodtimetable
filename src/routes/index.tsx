@@ -1477,7 +1477,9 @@ function Index() {
     if (cell.kind === "blocked") return { text: cell.label, bg: "#e5e7eb", fg: "#374151" };
     const course = courses.find((c) => c.id === cell.courseId);
     return {
-      text: course ? `${course.name}\n${course.faculty}` : "?",
+      text: course
+        ? `${course.name}\n${course.faculty}${course.classroom ? ` · ${course.classroom}` : ""}`
+        : "?",
       bg: course?.color ?? "#ddd",
       fg: "#1f2937",
     };
