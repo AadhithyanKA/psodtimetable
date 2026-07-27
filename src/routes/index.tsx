@@ -1446,7 +1446,6 @@ function Index() {
     if (Number.isFinite(fromMs) && Number.isFinite(toMs) && toMs >= fromMs) {
       weekCount = Math.max(1, Math.ceil((toMs - fromMs) / msPerDay / 7));
     }
-    const cycleLabel = Array.from({ length: weekCount }, (_, i) => `W${i + 1}`).join(",");
     state.classes.forEach((cls) => {
       const rows: (string | number)[][] = [header];
       cls.courses.forEach((course) => {
@@ -1466,19 +1465,21 @@ function Index() {
         if (weekly <= 0 && L + T + P === 0) weekly = 1;
         const emit = (subjectCode: string, length: number, lessons: number) => {
           if (lessons <= 0) return;
-          const rowIdx = rows.length + 1;
-          rows.push([
-            teacher,
-            className,
-            group,
-            subjectCode,
-            subjectName,
-            length,
-            lessons,
-            classroom,
-            cycleLabel,
-            { f: `G${rowIdx}/${weekCount}` } as unknown as string,
-          ]);
+          // One row per week in the planning range.
+          for (let w = 1; w <= weekCount; w++) {
+            rows.push([
+              teacher,
+              className,
+              group,
+              subjectCode,
+              subjectName,
+              length,
+              lessons,
+              classroom,
+              `W${w}`,
+              "",
+            ]);
+          }
         };
         if (P > 0 && L + T > 0) {
           emit(subjectName, span, L + T);
