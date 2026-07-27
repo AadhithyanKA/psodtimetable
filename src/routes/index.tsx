@@ -1437,6 +1437,15 @@ function Index() {
       "",
     ];
     const wb = XLSX.utils.book_new();
+    // Cycle covers every week in the planning range (W1..Wn), not just W1.
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const fromMs = Date.parse(state.fromDate);
+    const toMs = Date.parse(state.toDate);
+    let weekCount = 1;
+    if (Number.isFinite(fromMs) && Number.isFinite(toMs) && toMs >= fromMs) {
+      weekCount = Math.max(1, Math.ceil((toMs - fromMs) / msPerDay / 7));
+    }
+    const cycleLabel = Array.from({ length: weekCount }, (_, i) => `W${i + 1}`).join(",");
     state.classes.forEach((cls) => {
       const rows: (string | number)[][] = [header];
       cls.courses.forEach((course) => {
@@ -1466,8 +1475,8 @@ function Index() {
             length,
             lessons,
             classroom,
-            "W1",
-            { f: `G${rowIdx}/18` } as unknown as string,
+            cycleLabel,
+            { f: `G${rowIdx}/${weekCount}` } as unknown as string,
           ]);
         };
         if (P > 0 && L + T > 0) {
