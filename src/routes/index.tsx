@@ -1540,7 +1540,7 @@ function Index() {
   };
   const exportASC = () => {
     // aSc TimeTables "Data to Fill" import workbook. One sheet per class,
-    // one row per course (with a `_P` practical row when P > 0 and L/T > 0).
+    // with theory rows as course code and practical rows as coursecode_P.
     const header = [
       "Teacher",
       "Class",
@@ -1587,10 +1587,10 @@ function Index() {
         const emit = (subjectCode: string, length: number, lessonsByWeek: number[]) => {
           if (lessonsByWeek.every((lessons) => lessons <= 0)) return;
           lessonsByWeek.forEach((lessons, index) => {
-          if (lessons <= 0) return;
-          const weight = Number.isFinite(lessons) && lessons > 0
-            ? Number((lessons / 18).toFixed(4))
-            : 0;
+            if (lessons <= 0) return;
+            const weight = Number.isFinite(lessons) && lessons > 0
+              ? Number((lessons / 18).toFixed(4))
+              : 0;
             rows.push([
               teacher,
               className,
