@@ -2568,6 +2568,124 @@ function Index() {
               </table>
             </div>
           </div>
+
+          {/* Bottom tools bar: course chips, eraser, override toggle */}
+          <div className="sticky bottom-0 z-30 border-t-2 border-[#0d0d0d] bg-[#f5f3ee]/95 px-4 py-2 backdrop-blur sm:px-8">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/60">
+                Tools
+              </span>
+              <div className="flex flex-wrap items-center gap-1">
+                {(activeClass?.courses ?? []).map((c) => {
+                  const active = armedTool?.kind === "course" && armedTool.courseId === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() =>
+                        setArmedTool(active ? null : { kind: "course", courseId: c.id })
+                      }
+                      className={
+                        "flex items-center gap-1 border-2 px-2 py-1 text-[11px] font-bold transition " +
+                        (active
+                          ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee] shadow-[2px_2px_0px_0px_#0d0d0d]"
+                          : "border-[#0d0d0d]/60 bg-white text-[#0d0d0d] hover:border-[#0d0d0d]")
+                      }
+                      title={`${c.name}${c.faculty ? " · " + c.faculty : ""}`}
+                    >
+                      <span
+                        className="inline-block h-3 w-3 border border-[#0d0d0d]/40"
+                        style={{ backgroundColor: c.color }}
+                      />
+                      <span className="max-w-[10rem] truncate">{c.name || "Untitled"}</span>
+                    </button>
+                  );
+                })}
+                {(activeClass?.courses ?? []).length === 0 && (
+                  <span className="text-[11px] italic text-[#2d2d2d]/50">
+                    Add a course in the sidebar
+                  </span>
+                )}
+              </div>
+              <span className="mx-1 h-6 w-px bg-[#0d0d0d]/20" />
+              <button
+                onClick={() =>
+                  setArmedTool(
+                    armedTool?.kind === "erase" ? null : { kind: "erase" },
+                  )
+                }
+                className={
+                  "border-2 px-2 py-1 text-[11px] font-bold uppercase tracking-wider transition " +
+                  (armedTool?.kind === "erase"
+                    ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee] shadow-[2px_2px_0px_0px_#0d0d0d]"
+                    : "border-[#0d0d0d]/60 bg-white hover:border-[#0d0d0d]")
+                }
+                title="Eraser — click cells to clear"
+              >
+                Eraser
+              </button>
+              <button
+                onClick={() =>
+                  setArmedTool(
+                    armedTool?.kind === "break" ? null : { kind: "break" },
+                  )
+                }
+                className={
+                  "border-2 px-2 py-1 text-[11px] font-bold uppercase tracking-wider transition " +
+                  (armedTool?.kind === "break"
+                    ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee] shadow-[2px_2px_0px_0px_#0d0d0d]"
+                    : "border-[#0d0d0d]/60 bg-white hover:border-[#0d0d0d]")
+                }
+              >
+                Break
+              </button>
+              <button
+                onClick={() =>
+                  setArmedTool(
+                    armedTool?.kind === "blocked" ? null : { kind: "blocked" },
+                  )
+                }
+                className={
+                  "border-2 px-2 py-1 text-[11px] font-bold uppercase tracking-wider transition " +
+                  (armedTool?.kind === "blocked"
+                    ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee] shadow-[2px_2px_0px_0px_#0d0d0d]"
+                    : "border-[#0d0d0d]/60 bg-white hover:border-[#0d0d0d]")
+                }
+              >
+                Block
+              </button>
+              <span className="mx-1 h-6 w-px bg-[#0d0d0d]/20" />
+              <button
+                onClick={() => setOverrideMode((v) => !v)}
+                className={
+                  "flex items-center gap-2 border-2 px-2 py-1 text-[11px] font-bold uppercase tracking-wider transition " +
+                  (overrideMode
+                    ? "border-red-700 bg-red-600 text-white shadow-[2px_2px_0px_0px_#0d0d0d]"
+                    : "border-[#0d0d0d]/60 bg-white hover:border-[#0d0d0d]")
+                }
+                title="Bypass faculty-busy and course-rule checks when placing manually"
+              >
+                <span
+                  className={
+                    "inline-block h-3 w-6 border-2 " +
+                    (overrideMode ? "border-white bg-white/30" : "border-[#0d0d0d]/50 bg-[#f5f3ee]")
+                  }
+                >
+                  <span
+                    className={
+                      "block h-full w-1/2 " +
+                      (overrideMode ? "translate-x-full bg-white" : "bg-[#0d0d0d]/50")
+                    }
+                  />
+                </span>
+                Override {overrideMode ? "ON" : "OFF"}
+              </button>
+              {overrideMode && (
+                <span className="text-[10px] font-semibold text-red-700">
+                  Rules & faculty conflicts bypassed for manual placement
+                </span>
+              )}
+            </div>
+          </div>
         </main>
       </div>
 
