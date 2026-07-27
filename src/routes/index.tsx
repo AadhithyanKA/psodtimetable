@@ -613,6 +613,10 @@ function Index() {
   };
 
   const clearTimetable = () => {
+    if (state.frozen) {
+      setAutoFillReport("Timetable is frozen — unfreeze to clear.");
+      return;
+    }
     if (!confirm("Clear every course assignment from all classes? Breaks and blocked slots will stay.")) return;
     setState((s) => ({
       ...s,
