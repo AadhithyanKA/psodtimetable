@@ -225,7 +225,6 @@ const nonBreakCount = (slots: Slot[]) => slots.filter((slot) => !slot.isBreak).l
 // durationSlots, but we count them as P sessions per week to match the
 // semester model where LTPC × 15 weeks = total sessions).
 // Falls back to weeklyPeriods when no LTPC values are set.
-const LTPC_WEEKS = 15;
 const courseWeeklyTarget = (course: Course): number => {
   const L = Math.max(0, course.lectureHours ?? 0);
   const T = Math.max(0, course.tutorialHours ?? 0);
