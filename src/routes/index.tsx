@@ -1489,6 +1489,9 @@ function Index() {
         if (weekly <= 0 && L + T + P === 0) weekly = 1;
         const emit = (subjectCode: string, length: number, lessons: number) => {
           if (lessons <= 0) return;
+          const weight = Number.isFinite(lessons) && lessons > 0
+            ? Number((lessons / 18).toFixed(4))
+            : 0;
           // One row per week in the planning range.
           for (let w = 1; w <= weekCount; w++) {
             rows.push([
@@ -1501,7 +1504,7 @@ function Index() {
               lessons,
               classroom,
               `W${w}`,
-              "",
+              weight,
             ]);
           }
         };
