@@ -280,6 +280,8 @@ const courseTotalTarget = (course: Course, weeks: number): number => {
   const T = Math.max(0, course.tutorialHours ?? 0);
   const P = Math.max(0, course.practicalHours ?? 0);
   if (L + T + P > 0) return (L + T + P) * Math.max(0, weeks);
+  const weekly = Math.max(0, course.weeklyPeriods ?? 0);
+  if (weekly > 0 && weeks > 0) return weekly * weeks;
   return 0;
 };
 const splitTotalAcrossWeeks = (total: number, weeks: number): number[] => {
