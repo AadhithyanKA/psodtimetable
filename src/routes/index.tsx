@@ -306,6 +306,7 @@ const normalizeStateSnapshot = (snapshot: SavedState): State => {
     toDate: snapshot.toDate || base.toDate,
     slots,
     classes,
+    frozen: Boolean(snapshot.frozen),
   };
 };
 
