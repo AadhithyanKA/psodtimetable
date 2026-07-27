@@ -72,6 +72,9 @@ type State = {
   toDate: string;
   slots: Slot[];
   classes: ClassData[];
+  // When true, the timetable is locked: no edits, no auto-fill, and
+  // conflict/override warnings are suppressed so overrides become permanent.
+  frozen?: boolean;
 };
 
 const COLORS = [
