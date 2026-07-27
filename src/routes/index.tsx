@@ -1746,11 +1746,12 @@ function Index() {
     };
     const planFor = (cls: ClassData) =>
       cls.courses.reduce((sum, c) => {
+        if (c.disabled) return sum;
         const totalT = courseTotalTarget(c, courseSemesterWeeks(c, state));
         const requested = totalT > 0 ? totalT : courseWeeklyTarget(c) * weekCount;
         const capacity = countCourseRuleCapacity(c, state.slots, dates);
         if (requested <= 0) return sum + capacity;
-        return sum + Math.min(requested, capacity);
+        return sum + requested;
       }, 0);
     const activePlanned = activeClass ? planFor(activeClass) : 0;
     const activePlaced = activeClass ? countPlaced(activeClass) : 0;
@@ -1935,7 +1936,7 @@ function Index() {
                       {([
                         ["lectureHours", "L", "Lecture hours per week"],
                         ["tutorialHours", "T", "Tutorial hours per week"],
-                        ["practicalHours", "P", "Practical hours per week (each hour = 2 sessions)"],
+                        ["practicalHours", "P", "Practical sessions per week"],
                         ["credits", "C", "Credits (informational)"],
                       ] as [keyof Course, string, string][]).map(([field, label, tip]) => (
                         <label
@@ -1976,7 +1977,7 @@ function Index() {
                         <span title="Consecutive periods per session">span</span>
                       </label>
                       <label
-                        title="Sessions per week (auto-fill target). Derived from LTPC (L+T+P) when any of L/T/P is set. Total across semester = (L+T+P) × 15 weeks."
+                        title="Sessions per week (auto-fill target). Derived from LTPC (L+T+P) when any of L/T/P is set. Total uses this course date range inside the timetable."
                         className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
@@ -2000,7 +2001,7 @@ function Index() {
                         <span>/wk</span>
                       </label>
                       <label
-                        title="Total sessions across the whole date range. Auto-derived from LTPC as (L+T+P) × 15 when blank; type a value to override."
+                        title="Total sessions across this course date range inside the timetable. Auto-derived from LTPC as (L+T+P) × course weeks when blank; type a value to override."
                         className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
