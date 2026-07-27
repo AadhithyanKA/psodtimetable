@@ -1667,6 +1667,14 @@ function Index() {
                         placeholder="Faculty"
                         className="min-w-0 border-b border-dashed border-[#0d0d0d]/20 bg-transparent text-xs text-[#2d2d2d]/70 outline-none focus:border-[#0d0d0d]"
                       />
+                      <input
+                        value={c.classroom ?? ""}
+                        onChange={(e) => updateCourse(c.id, { classroom: e.target.value })}
+                        placeholder="Room"
+                        title="Classroom / room name"
+                        className="col-span-2 min-w-0 border-b border-dashed border-[#0d0d0d]/20 bg-transparent text-xs text-[#2d2d2d]/70 outline-none focus:border-[#0d0d0d]"
+                        style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                      />
                       <label
                         className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
