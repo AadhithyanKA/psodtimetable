@@ -3147,6 +3147,21 @@ function Index() {
           </div>
         );
       })()}
+      {autoStatus && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0d0d0d]/60 backdrop-blur-sm">
+          <div className="w-[min(420px,90vw)] border-2 border-[#0d0d0d] bg-[#f5f3ee] p-5 shadow-[6px_6px_0_#0d0d0d]">
+            <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[#2d2d2d]/70">
+              Auto-fill
+            </div>
+            <div className="mb-3 text-lg font-bold text-[#0d0d0d]">{autoStatus.label}</div>
+            <div className="mb-2 h-2 w-full overflow-hidden border-2 border-[#0d0d0d] bg-white">
+              <div className="h-full w-1/3 animate-[autofill_1.1s_ease-in-out_infinite] bg-amber-400" />
+            </div>
+            <div className="text-[11px] text-[#2d2d2d]/80">{autoStatus.phase}</div>
+          </div>
+          <style>{`@keyframes autofill{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}`}</style>
+        </div>
+      )}
     </div>
   );
 }
