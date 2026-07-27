@@ -1402,7 +1402,14 @@ function Index() {
         else if (cell.kind === "blocked") row.push(`Blocked: ${cell.label}`);
         else if (cell.kind === "course") {
           const c = cls.courses.find((x) => x.id === cell.courseId);
-          row.push(c ? `${c.name} (${c.faculty})` : "");
+          if (!c) { row.push(""); }
+          else {
+            const P = Math.max(0, c.practicalHours ?? 0);
+            const LT = Math.max(0, c.lectureHours ?? 0) + Math.max(0, c.tutorialHours ?? 0);
+            const isPractical = P > 0 && (LT === 0 || (c.durationSlots ?? 1) >= 2);
+            const code = isPractical ? `${c.name}_P` : c.name;
+            row.push(`${code} (${c.faculty})`);
+          }
         } else row.push("");
       });
       rows.push(row);
