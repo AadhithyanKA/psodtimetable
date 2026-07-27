@@ -1459,7 +1459,7 @@ function Index() {
       "Lessons/week",
       "Available classrooms",
       "Cycle",
-      "",
+      "weight",
     ];
     const wb = XLSX.utils.book_new();
     // Cycle covers every week in the planning range (W1..Wn), not just W1.
