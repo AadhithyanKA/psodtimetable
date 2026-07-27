@@ -1449,7 +1449,11 @@ function Index() {
         const T = Math.max(0, course.tutorialHours ?? 0);
         const P = Math.max(0, course.practicalHours ?? 0);
         const span = cleanDurationSlots(course.durationSlots, state.slots);
-        const weekly = courseWeeklyTarget(course);
+        let weekly = courseWeeklyTarget(course);
+        if (weekly <= 0 && (course.totalSessions ?? 0) > 0) {
+          weekly = Math.max(1, course.totalSessions ?? 0);
+        }
+        if (weekly <= 0 && L + T + P === 0) weekly = 1;
         const emit = (subjectCode: string, length: number, lessons: number) => {
           if (lessons <= 0) return;
           const rowIdx = rows.length + 1;
