@@ -261,6 +261,7 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
     name: rest.name || "New Course",
     faculty: rest.faculty || "Faculty",
     classroom: typeof rest.classroom === "string" ? rest.classroom : "",
+    disabled: rest.disabled === true ? true : undefined,
     color: rest.color || COLORS[0],
     durationSlots: cleanDurationSlots(rest.durationSlots, slots),
     weeklyPeriods: Math.max(0, Math.floor(rest.weeklyPeriods ?? 0)),
