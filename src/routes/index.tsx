@@ -2888,9 +2888,12 @@ function Index() {
                           className="mt-0.5 block text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/70"
                           style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                         >
-                          {c.totalSessions && c.totalSessions > 0
-                            ? `${placedForCourse} / ${c.totalSessions} sessions`
-                            : `${placedForCourse} placed · no total set`}
+                          {(() => {
+                            const t = courseTotalTarget(c);
+                            return t > 0
+                              ? `${placedForCourse} / ${t} sessions`
+                              : `${placedForCourse} placed · no total set`;
+                          })()}
                         </span>
                       </span>
                       {!allowed && (
