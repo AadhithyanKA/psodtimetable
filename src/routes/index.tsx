@@ -1700,6 +1700,32 @@ function Index() {
                       />
                     </div>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
+                      {(["lectureHours", "L", "Lecture hours/wk"], ["tutorialHours", "T", "Tutorial hours/wk"], ["practicalHours", "P", "Practical hours/wk (each hour = 2 sessions)"], ["credits", "C", "Credits"]) as unknown}
+                      {([
+                        ["lectureHours", "L", "Lecture hours per week"],
+                        ["tutorialHours", "T", "Tutorial hours per week"],
+                        ["practicalHours", "P", "Practical hours per week (each hour = 2 sessions)"],
+                        ["credits", "C", "Credits (informational)"],
+                      ] as [keyof Course, string, string][]).map(([field, label, tip]) => (
+                        <label
+                          key={field as string}
+                          title={tip}
+                          className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
+                          style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                        >
+                          <span>{label}</span>
+                          <input
+                            type="number"
+                            min={0}
+                            value={(c[field] as number | undefined) ?? 0}
+                            onChange={(e) => {
+                              const n = Math.max(0, parseInt(e.target.value || "0", 10));
+                              updateCourse(c.id, { [field]: n > 0 ? n : undefined } as Partial<Course>);
+                            }}
+                            className="w-10 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
+                          />
+                        </label>
+                      ))}
                       <label
                         className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
@@ -1719,21 +1745,27 @@ function Index() {
                         <span title="Consecutive periods per session">span</span>
                       </label>
                       <label
-                        title="Sessions per week (auto-fill target)"
+                        title="Sessions per week (auto-fill target). Derived from LTPC (L+T+2P) when any of L/T/P is set."
                         className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
-                        <input
-                          type="number"
-                          min={0}
-                          value={c.weeklyPeriods ?? 0}
-                          onChange={(e) =>
-                            updateCourse(c.id, {
-                              weeklyPeriods: Math.max(0, parseInt(e.target.value || "0", 10)),
-                            })
-                          }
-                          className="w-10 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
-                        />
+                        {((c.lectureHours ?? 0) + (c.tutorialHours ?? 0) + (c.practicalHours ?? 0)) > 0 ? (
+                          <span className="rounded bg-[#0d0d0d]/5 px-1.5 py-0.5 text-xs">
+                            {courseWeeklyTarget(c)}
+                          </span>
+                        ) : (
+                          <input
+                            type="number"
+                            min={0}
+                            value={c.weeklyPeriods ?? 0}
+                            onChange={(e) =>
+                              updateCourse(c.id, {
+                                weeklyPeriods: Math.max(0, parseInt(e.target.value || "0", 10)),
+                              })
+                            }
+                            className="w-10 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
+                          />
+                        )}
                         <span>/wk</span>
                       </label>
                       <label
