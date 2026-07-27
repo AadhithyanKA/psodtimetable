@@ -394,6 +394,7 @@ function Index() {
   const [bulkSlots, setBulkSlots] = useState<number[]>([]);
   const [bulkAllClasses, setBulkAllClasses] = useState(false);
   const [autoFillReport, setAutoFillReport] = useState<string>("");
+  const [autoStatus, setAutoStatus] = useState<{ label: string; phase: string } | null>(null);
   const [pendingScrollClassId, setPendingScrollClassId] = useState<string | null>(null);
   const [pendingBlockCsv, setPendingBlockCsv] = useState<{ name: string; text: string } | null>(null);
   const [blockReport, setBlockReport] = useState<string>("");
@@ -2064,15 +2065,15 @@ function Index() {
                 Fill by Rules uses every allowed weekday and period opportunity.
               </p>
               <div className="mb-3 grid grid-cols-2 gap-1">
-                <button
-                  onClick={() => autoPopulate({ overwrite: false })}
+                 <button
+                   onClick={() => runAutoPopulate("Fill Empty", { overwrite: false })}
                   className="border-2 border-[#0d0d0d] bg-white px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
                 >
                   Fill Empty
                 </button>
                 <button
                   onClick={() => {
-                    if (confirm("Clear all courses and re-generate?")) autoPopulate({ overwrite: true });
+                    if (confirm("Clear all courses and re-generate?")) runAutoPopulate("Regenerate", { overwrite: true });
                   }}
                   className="border-2 border-[#0d0d0d] bg-[#0d0d0d] px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#f5f3ee] hover:opacity-90"
                 >
@@ -2081,7 +2082,7 @@ function Index() {
               </div>
               <div className="mb-3 grid grid-cols-2 gap-1">
                 <button
-                  onClick={() => autoPopulate({ overwrite: false, strictRules: true })}
+                   onClick={() => runAutoPopulate("Fill by Rules", { overwrite: false, strictRules: true })}
                   className="border-2 border-[#0d0d0d] bg-amber-200 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-amber-300"
                   title="Places courses in their rule periods. If /wk is 0, uses every allowed period opportunity."
                 >
@@ -2090,7 +2091,7 @@ function Index() {
                 <button
                   onClick={() => {
                     if (confirm("Clear all courses and fill only by course rules?")) {
-                      autoPopulate({ overwrite: true, strictRules: true });
+                       runAutoPopulate("Regen Rules", { overwrite: true, strictRules: true });
                     }
                   }}
                   className="border-2 border-[#0d0d0d] bg-amber-300 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-amber-400"
