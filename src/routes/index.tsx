@@ -1542,7 +1542,7 @@ function Index() {
       cls.courses.reduce((sum, c) => {
         const requested = c.totalSessions && c.totalSessions > 0
           ? c.totalSessions
-          : Math.max(0, c.weeklyPeriods ?? 0) * weekCount;
+          : courseWeeklyTarget(c) * weekCount;
         const capacity = countCourseRuleCapacity(c, state.slots, dates);
         if (requested <= 0) return sum + capacity;
         return sum + Math.min(requested, capacity);
