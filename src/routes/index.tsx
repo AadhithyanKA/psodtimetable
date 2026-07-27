@@ -1027,7 +1027,7 @@ function Index() {
       classes.forEach((cls) => {
         cls.courses.forEach((course) => {
           if (course.disabled) return;
-          const totalTarget = courseTotalTarget(course);
+          const totalTarget = courseTotalTarget(course, courseSemesterWeeks(course, s));
           if (totalTarget > 0) {
             addTask(cls, course, workingDates, totalTarget, "total");
             return;
@@ -1684,7 +1684,7 @@ function Index() {
     };
     const planFor = (cls: ClassData) =>
       cls.courses.reduce((sum, c) => {
-        const totalT = courseTotalTarget(c);
+        const totalT = courseTotalTarget(c, courseSemesterWeeks(c, state));
         const requested = totalT > 0 ? totalT : courseWeeklyTarget(c) * weekCount;
         const capacity = countCourseRuleCapacity(c, state.slots, dates);
         if (requested <= 0) return sum + capacity;
@@ -1959,7 +1959,7 @@ function Index() {
                     <div className="px-3 pb-2">
                       {(() => {
                         const placed = coursePlacementCounts.get(c.id) ?? 0;
-                        const target = courseTotalTarget(c);
+                         const target = courseTotalTarget(c, courseSemesterWeeks(c, state));
                         const pct =
                           target > 0 ? Math.min(100, Math.round((placed / target) * 100)) : 0;
                         const done = target > 0 && placed >= target;
@@ -2924,7 +2924,7 @@ function Index() {
                           style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                         >
                           {(() => {
-                            const t = courseTotalTarget(c);
+                            const t = courseTotalTarget(c, courseSemesterWeeks(c, state));
                             return t > 0
                               ? `${placedForCourse} / ${t} sessions`
                               : `${placedForCourse} placed · no total set`;
