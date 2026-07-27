@@ -974,7 +974,7 @@ function Index() {
             return;
           }
           weeks.forEach((weekDates, key) => {
-            const desired = course.weeklyPeriods && course.weeklyPeriods > 0 ? course.weeklyPeriods : 0;
+            const desired = courseWeeklyTarget(course);
             addTask(cls, course, weekDates, desired, key);
           });
         });
