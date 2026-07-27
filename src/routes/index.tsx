@@ -1543,6 +1543,10 @@ function Index() {
   const exportASC = () => {
     // aSc TimeTables "Data to Fill" import workbook. One sheet per class,
     // with theory rows as course code and practical rows as coursecode_P.
+    // Lessons/week is based on the ACTUAL sessions placed on the timetable
+    // for each course, grouped per calendar week (W1, W2 ...). Theory =
+    // single-slot placements (Length 1). Practical = multi-slot placements
+    // (Length equals the course span, typically 2).
     const header = [
       "Teacher",
       "Class",
@@ -1556,68 +1560,87 @@ function Index() {
       "weight",
     ];
     const wb = XLSX.utils.book_new();
-    // Weeks come from each course's active range intersected with the actual
-    // timetable range. Lesson totals are planned from LTPC/course totals and
-    // split across W1, W2... so Length × Lessons/week matches the full course
-    // requirement for the timetable being designed.
     state.classes.forEach((cls) => {
       const rows: (string | number)[][] = [header];
       cls.courses.forEach((course) => {
-        const weekCount = courseSemesterWeeks(course, state);
-        if (weekCount <= 0) return;
         const teacher = course.faculty || "";
         const className = cls.name;
         const group = "Entire class";
         const subjectName = course.name;
         const classroom = course.classroom || "";
-        const L = Math.max(0, course.lectureHours ?? 0);
-        const T = Math.max(0, course.tutorialHours ?? 0);
-        const P = Math.max(0, course.practicalHours ?? 0);
-        const span = cleanDurationSlots(course.durationSlots, state.slots);
-        const hasLTPC = L + T + P > 0;
-        const theoryPerWeek = L + T;
-        const totalTarget = courseTotalTarget(course, weekCount);
-        const theoryTotal = hasLTPC
-          ? theoryPerWeek * weekCount
-          : Math.max(0, totalTarget || courseWeeklyTarget(course) * weekCount);
-        const practicalTotal = hasLTPC ? P * weekCount : 0;
-        let weekly = courseWeeklyTarget(course);
-        if (weekly <= 0 && (course.totalSessions ?? 0) > 0) {
-          weekly = Math.max(1, course.totalSessions ?? 0);
-        }
-        if (weekly <= 0 && L + T + P === 0) weekly = 1;
-        const emit = (subjectCode: string, length: number, lessonsByWeek: number[]) => {
-          if (lessonsByWeek.every((lessons) => lessons <= 0)) return;
-          lessonsByWeek.forEach((lessons, index) => {
-            if (lessons <= 0) return;
-            const weight = Number.isFinite(lessons) && lessons > 0
-              ? Number((lessons / 18).toFixed(4))
-              : 0;
-            rows.push([
-              teacher,
-              className,
-              group,
-              subjectCode,
-              subjectName,
-              length,
-              lessons,
-              classroom,
-              `W${index + 1}`,
-              weight,
-            ]);
-          });
-        };
-        if (hasLTPC) {
-          const theoryLessons = splitTotalAcrossWeeks(theoryTotal, weekCount);
-          const practicalPeriods = splitTotalAcrossWeeks(practicalTotal, weekCount);
-          const practicalPairs = practicalPeriods.map((periods) => Math.floor(periods / 2));
-          const practicalSingles = practicalPeriods.map((periods) => periods % 2);
-          if (theoryTotal > 0) emit(subjectName, 1, theoryLessons);
-          if (practicalPairs.some((lessons) => lessons > 0)) emit(`${subjectName}_P`, 2, practicalPairs);
-          if (practicalSingles.some((lessons) => lessons > 0)) emit(`${subjectName}_P`, 1, practicalSingles);
-        } else {
-          emit(subjectName, span, splitTotalAcrossWeeks(Math.max(weekly * weekCount, totalTarget), weekCount));
-        }
+        // Walk the grid and tally actual placed session starts per week,
+        // keyed by length (span). Theory placements are Length=1, practical
+        // placements are Length>=2.
+        // key: `${weekIndex}|${length}` -> count
+        const perWeekByLength = new Map<string, number>();
+        let maxWeek = 0;
+        dates.forEach((date) => {
+          let slotIdx = 0;
+          while (slotIdx < state.slots.length) {
+            const cell = cls.grid[`${date}-${slotIdx}`];
+            if (cell?.kind !== "course" || cell.courseId !== course.id) {
+              slotIdx++;
+              continue;
+            }
+            // Measure contiguous span of this course starting here
+            let len = 0;
+            while (
+              slotIdx + len < state.slots.length &&
+              !state.slots[slotIdx + len]?.isBreak
+            ) {
+              const part = cls.grid[`${date}-${slotIdx + len}`];
+              if (part?.kind !== "course" || part.courseId !== course.id) break;
+              len++;
+            }
+            if (len <= 0) {
+              slotIdx++;
+              continue;
+            }
+            const cycle =
+              courseCycleForDate(course, state, date) ??
+              (() => {
+                // Fallback: week index relative to global timetable start
+                const start = utcDateFromIso(state.fromDate);
+                const cur = utcDateFromIso(date);
+                if (!start || !cur) return 1;
+                return Math.floor((cur.getTime() - start.getTime()) / (7 * 86400000)) + 1;
+              })();
+            if (cycle > maxWeek) maxWeek = cycle;
+            const key = `${cycle}|${len}`;
+            perWeekByLength.set(key, (perWeekByLength.get(key) ?? 0) + 1);
+            slotIdx += len;
+          }
+        });
+        if (perWeekByLength.size === 0) return;
+        // Emit rows grouped by (length, week). Theory (len 1) uses subject name;
+        // practical (len >= 2) uses `${name}_P`.
+        const sortedKeys = Array.from(perWeekByLength.keys()).sort((a, b) => {
+          const [wa, la] = a.split("|").map(Number);
+          const [wb2, lb] = b.split("|").map(Number);
+          if (wa !== wb2) return wa - wb2;
+          return la - lb;
+        });
+        sortedKeys.forEach((key) => {
+          const lessons = perWeekByLength.get(key) ?? 0;
+          if (lessons <= 0) return;
+          const [cycleStr, lenStr] = key.split("|");
+          const cycle = Number(cycleStr);
+          const length = Number(lenStr);
+          const subjectCode = length >= 2 ? `${subjectName}_P` : subjectName;
+          const weight = Number((lessons / 18).toFixed(4));
+          rows.push([
+            teacher,
+            className,
+            group,
+            subjectCode,
+            subjectName,
+            length,
+            lessons,
+            classroom,
+            `W${cycle}`,
+            weight,
+          ]);
+        });
       });
       const ws = XLSX.utils.aoa_to_sheet(rows);
       ws["!cols"] = [
