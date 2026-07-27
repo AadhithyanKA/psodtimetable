@@ -233,15 +233,33 @@ const courseWeeklyTarget = (course: Course): number => {
   if (L + T + P > 0) return L + T + P;
   return Math.max(0, course.weeklyPeriods ?? 0);
 };
-// Total sessions across the semester. Explicit totalSessions overrides;
-// otherwise LTPC → (L+T+P) × 15 weeks. Example: L=1,T=0,P=4 → 5 × 15 = 75
-// (15 theory + 60 practical).
-const courseTotalTarget = (course: Course): number => {
+// Number of calendar weeks covered by [from, to] inclusive (ceil days/7).
+const weeksInRange = (from?: string, to?: string): number => {
+  if (!from || !to) return 0;
+  const d1 = Date.parse(`${from}T00:00:00Z`);
+  const d2 = Date.parse(`${to}T00:00:00Z`);
+  if (!Number.isFinite(d1) || !Number.isFinite(d2) || d2 < d1) return 0;
+  const days = Math.floor((d2 - d1) / 86400000) + 1;
+  return Math.max(1, Math.ceil(days / 7));
+};
+// Weeks a course is scheduled over: its own from/to overrides state's range.
+const courseSemesterWeeks = (
+  course: Course,
+  state: { fromDate: string; toDate: string },
+): number => {
+  const from = course.fromDate || state.fromDate;
+  const to = course.toDate || state.toDate;
+  return weeksInRange(from, to);
+};
+// Total sessions across the course's active range. Explicit totalSessions
+// overrides; otherwise LTPC → (L+T+P) × weeks-in-range.
+// Example over 15 weeks: L=1,T=0,P=4 → 5 × 15 = 75 (15 theory + 60 practical).
+const courseTotalTarget = (course: Course, weeks: number): number => {
   if (course.totalSessions && course.totalSessions > 0) return course.totalSessions;
   const L = Math.max(0, course.lectureHours ?? 0);
   const T = Math.max(0, course.tutorialHours ?? 0);
   const P = Math.max(0, course.practicalHours ?? 0);
-  if (L + T + P > 0) return (L + T + P) * LTPC_WEEKS;
+  if (L + T + P > 0) return (L + T + P) * Math.max(0, weeks);
   return 0;
 };
 const cleanDurationSlots = (value: unknown, slots: Slot[]): number => {
