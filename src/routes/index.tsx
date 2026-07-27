@@ -35,6 +35,7 @@ type Course = {
   id: string;
   name: string;
   faculty: string;
+  classroom?: string;
   color: string;
   durationSlots: number;
   // Target number of sessions per week (used by auto-fill). 0 = don't auto-fill.
