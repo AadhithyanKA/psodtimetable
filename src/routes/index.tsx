@@ -40,6 +40,13 @@ type Course = {
   durationSlots: number;
   // Target number of sessions per week (used by auto-fill). 0 = don't auto-fill.
   weeklyPeriods?: number;
+  // LTPC structure. When any of L/T/P > 0 the weekly session target is
+  // derived as L + T + 2*P (1 practical hour = 2 sessions) and overrides
+  // `weeklyPeriods` in auto-fill and planned counters. C is informational.
+  lectureHours?: number;
+  tutorialHours?: number;
+  practicalHours?: number;
+  credits?: number;
   // Total number of sessions to place across the whole date range.
   // When set (>0) this overrides the per-week weeklyPeriods target during auto-fill
   // and drives the planned/remaining counters.
