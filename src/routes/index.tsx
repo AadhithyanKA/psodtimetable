@@ -1525,15 +1525,16 @@ function Index() {
       "weight",
     ];
     const wb = XLSX.utils.book_new();
-    // LTPC semester = 15 weeks. Total sessions per course = (L+T+P) × 15,
-    // so Cycle emits exactly 15 week-rows (W1..W15) regardless of the
-    // planning date range. This keeps ASC totals aligned with LTPC math
-    // (e.g. L=1,P=4 → 15 theory + 60 practical = 75).
-    const SEMESTER_WEEKS = 15;
-    const weekCount = SEMESTER_WEEKS;
+    // Weeks come from each course's active date range (or the global range
+    // when the course doesn't specify one). No 15-week cap: the Cycle column
+    // emits one W# row per week the course actually spans, so LTPC totals
+    // scale with the timetable duration (e.g. 20-week plan, L=1,P=4 → 20
+    // theory + 80 practical = 100).
     state.classes.forEach((cls) => {
       const rows: (string | number)[][] = [header];
       cls.courses.forEach((course) => {
+        const weekCount = courseSemesterWeeks(course, state);
+        if (weekCount <= 0) return;
         const teacher = course.faculty || "";
         const className = cls.name;
         const group = "Entire class";
