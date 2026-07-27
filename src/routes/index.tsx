@@ -221,9 +221,8 @@ type SavedState = Partial<Omit<State, "classes">> & {
 
 const nonBreakCount = (slots: Slot[]) => slots.filter((slot) => !slot.isBreak).length;
 // LTPC-derived weekly session target. Each unit of L, T, or P contributes
-// 1 session/week (P slots are still typically 2 consecutive periods via
-// durationSlots, but we count them as P sessions per week to match the
-// semester model where LTPC × 15 weeks = total sessions).
+// 1 scheduled period/week; multi-period practical blocks are counted by their
+// occupied periods so export totals match the visible timetable.
 // Falls back to weeklyPeriods when no LTPC values are set.
 const courseWeeklyTarget = (course: Course): number => {
   const L = Math.max(0, course.lectureHours ?? 0);
@@ -274,7 +273,7 @@ const courseCycleForDate = (
 };
 // Total sessions across the course's active range. Explicit totalSessions
 // overrides; otherwise LTPC → (L+T+P) × effective timetable weeks.
-// Example over 15 weeks: L=1,T=0,P=4 → 5 × 15 = 75 (15 theory + 60 practical).
+// Example over 15 weeks: L=1,T=0,P=4 → 5 × 15 = 75 (15 theory + 60 practical periods).
 const courseTotalTarget = (course: Course, weeks: number): number => {
   if (course.totalSessions && course.totalSessions > 0) return course.totalSessions;
   const L = Math.max(0, course.lectureHours ?? 0);
@@ -1621,7 +1620,7 @@ function Index() {
           const theoryRemaining = new Map<number, number>();
           splitTotalAcrossWeeks(theoryTotal, weekCount).forEach((value, index) => theoryRemaining.set(index + 1, value));
           const theoryPlaced = Array.from({ length: weekCount }, () => 0);
-          const practicalSingleSlots = Array.from({ length: weekCount }, () => 0);
+          const practicalBlocksByLength = new Map<number, number[]>();
           for (let week = 1; week <= weekCount; week++) {
             const starts = [...(placedStarts.get(week) ?? [])].sort((a, b) => a - b);
             starts.forEach(() => {
@@ -1630,21 +1629,32 @@ function Index() {
                 theoryPlaced[week - 1]++;
                 theoryRemaining.set(week, remainingTheory - 1);
               } else {
-                practicalSingleSlots[week - 1]++;
+                const length = Math.max(1, span);
+                const list = practicalBlocksByLength.get(length) ?? Array.from({ length: weekCount }, () => 0);
+                list[week - 1]++;
+                practicalBlocksByLength.set(length, list);
               }
             });
           }
           if (theoryPlaced.some((lessons) => lessons > 0) || !hasLTPC) {
             emit(subjectName, span, theoryPlaced);
           }
-          if (practicalSingleSlots.some((lessons) => lessons > 0)) {
-            emit(`${subjectName}_P`, 1, practicalSingleSlots);
-          }
+          [...practicalBlocksByLength.entries()]
+            .sort(([a], [b]) => a - b)
+            .forEach(([length, lessons]) => emit(`${subjectName}_P`, length, lessons));
         } else if (hasLTPC) {
           const theoryLessons = splitTotalAcrossWeeks(theoryTotal, weekCount);
-          const practicalLessons = splitTotalAcrossWeeks(practicalTotal, weekCount);
+          const practicalLength = P > 1 ? 2 : 1;
+          const practicalBlocks = splitTotalAcrossWeeks(Math.ceil(practicalTotal / practicalLength), weekCount);
+          let remainingPracticalPeriods = practicalTotal;
+          const practicalLessons = practicalBlocks.map((blocks) => {
+            const maxBlocksForRemaining = Math.ceil(Math.max(0, remainingPracticalPeriods) / practicalLength);
+            const adjusted = Math.min(blocks, maxBlocksForRemaining);
+            remainingPracticalPeriods -= adjusted * practicalLength;
+            return adjusted;
+          });
           if (theoryTotal > 0) emit(subjectName, span, theoryLessons);
-          if (practicalTotal > 0) emit(`${subjectName}_P`, 1, practicalLessons);
+          if (practicalTotal > 0) emit(`${subjectName}_P`, practicalLength, practicalLessons);
         } else {
           emit(subjectName, span, splitTotalAcrossWeeks(Math.max(weekly * weekCount, totalTarget), weekCount));
         }
