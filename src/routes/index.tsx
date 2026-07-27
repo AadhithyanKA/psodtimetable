@@ -41,8 +41,8 @@ type Course = {
   // Target number of sessions per week (used by auto-fill). 0 = don't auto-fill.
   weeklyPeriods?: number;
   // LTPC structure. When any of L/T/P > 0 the weekly session target is
-  // derived as L + T + 2*P (1 practical hour = 2 sessions) and overrides
-  // `weeklyPeriods` in auto-fill and planned counters. C is informational.
+  // derived as L + T + P and overrides `weeklyPeriods` in auto-fill and
+  // planned counters. C is informational.
   lectureHours?: number;
   tutorialHours?: number;
   practicalHours?: number;
@@ -241,17 +241,39 @@ const weeksInRange = (from?: string, to?: string): number => {
   const days = Math.floor((d2 - d1) / 86400000) + 1;
   return Math.max(1, Math.ceil(days / 7));
 };
-// Weeks a course is scheduled over: its own from/to overrides state's range.
+const effectiveCourseRange = (
+  course: Course,
+  state: { fromDate: string; toDate: string },
+): { from: string; to: string } | null => {
+  const from = [state.fromDate, course.fromDate].filter(isValidIso).sort()[1] ?? state.fromDate;
+  const to = [state.toDate, course.toDate].filter(isValidIso).sort()[0] ?? state.toDate;
+  if (!isValidIso(from) || !isValidIso(to) || to < from) return null;
+  return { from, to };
+};
+// Weeks a course is scheduled over: course from/to is intersected with the
+// timetable range so totals are based on the actual timetable being designed.
 const courseSemesterWeeks = (
   course: Course,
   state: { fromDate: string; toDate: string },
 ): number => {
-  const from = course.fromDate || state.fromDate;
-  const to = course.toDate || state.toDate;
-  return weeksInRange(from, to);
+  const range = effectiveCourseRange(course, state);
+  if (!range) return 0;
+  return weeksInRange(range.from, range.to);
+};
+const courseCycleForDate = (
+  course: Course,
+  state: { fromDate: string; toDate: string },
+  iso: string,
+): number | null => {
+  const range = effectiveCourseRange(course, state);
+  if (!range || iso < range.from || iso > range.to) return null;
+  const start = utcDateFromIso(range.from);
+  const current = utcDateFromIso(iso);
+  if (!start || !current || current < start) return null;
+  return Math.floor((current.getTime() - start.getTime()) / (7 * 86400000)) + 1;
 };
 // Total sessions across the course's active range. Explicit totalSessions
-// overrides; otherwise LTPC → (L+T+P) × weeks-in-range.
+// overrides; otherwise LTPC → (L+T+P) × effective timetable weeks.
 // Example over 15 weeks: L=1,T=0,P=4 → 5 × 15 = 75 (15 theory + 60 practical).
 const courseTotalTarget = (course: Course, weeks: number): number => {
   if (course.totalSessions && course.totalSessions > 0) return course.totalSessions;
@@ -260,6 +282,14 @@ const courseTotalTarget = (course: Course, weeks: number): number => {
   const P = Math.max(0, course.practicalHours ?? 0);
   if (L + T + P > 0) return (L + T + P) * Math.max(0, weeks);
   return 0;
+};
+const splitTotalAcrossWeeks = (total: number, weeks: number): number[] => {
+  const cleanTotal = Math.max(0, Math.floor(total));
+  const cleanWeeks = Math.max(0, Math.floor(weeks));
+  if (cleanTotal <= 0 || cleanWeeks <= 0) return [];
+  const base = Math.floor(cleanTotal / cleanWeeks);
+  const remainder = cleanTotal % cleanWeeks;
+  return Array.from({ length: cleanWeeks }, (_, index) => base + (index < remainder ? 1 : 0));
 };
 const cleanDurationSlots = (value: unknown, slots: Slot[]): number => {
   const parsed = typeof value === "number" ? value : parseInt(String(value ?? "1"), 10);
