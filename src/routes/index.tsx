@@ -1662,7 +1662,7 @@ function Index() {
                         ×
                       </button>
                     </div>
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2 px-3 py-2">
+                    <div className="grid grid-cols-2 gap-2 px-3 pt-2">
                       <input
                         value={c.faculty}
                         onChange={(e) => updateCourse(c.id, { faculty: e.target.value })}
@@ -1674,9 +1674,11 @@ function Index() {
                         onChange={(e) => updateCourse(c.id, { classroom: e.target.value })}
                         placeholder="Room"
                         title="Classroom / room name"
-                        className="col-span-2 min-w-0 border-b border-dashed border-[#0d0d0d]/20 bg-transparent text-xs text-[#2d2d2d]/70 outline-none focus:border-[#0d0d0d]"
+                        className="min-w-0 border-b border-dashed border-[#0d0d0d]/20 bg-transparent text-xs text-[#2d2d2d]/70 outline-none focus:border-[#0d0d0d]"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
                       <label
                         className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
