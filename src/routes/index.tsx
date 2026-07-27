@@ -220,15 +220,29 @@ type SavedState = Partial<Omit<State, "classes">> & {
 };
 
 const nonBreakCount = (slots: Slot[]) => slots.filter((slot) => !slot.isBreak).length;
-// LTPC-derived weekly session target. 1 L or T hour = 1 session; 1 P hour = 2
-// sessions (practicals are double periods). Falls back to weeklyPeriods when
-// no LTPC values are set.
+// LTPC-derived weekly session target. Each unit of L, T, or P contributes
+// 1 session/week (P slots are still typically 2 consecutive periods via
+// durationSlots, but we count them as P sessions per week to match the
+// semester model where LTPC × 15 weeks = total sessions).
+// Falls back to weeklyPeriods when no LTPC values are set.
+const LTPC_WEEKS = 15;
 const courseWeeklyTarget = (course: Course): number => {
   const L = Math.max(0, course.lectureHours ?? 0);
   const T = Math.max(0, course.tutorialHours ?? 0);
   const P = Math.max(0, course.practicalHours ?? 0);
-  if (L + T + P > 0) return L + T + 2 * P;
+  if (L + T + P > 0) return L + T + P;
   return Math.max(0, course.weeklyPeriods ?? 0);
+};
+// Total sessions across the semester. Explicit totalSessions overrides;
+// otherwise LTPC → (L+T+P) × 15 weeks. Example: L=1,T=0,P=4 → 5 × 15 = 75
+// (15 theory + 60 practical).
+const courseTotalTarget = (course: Course): number => {
+  if (course.totalSessions && course.totalSessions > 0) return course.totalSessions;
+  const L = Math.max(0, course.lectureHours ?? 0);
+  const T = Math.max(0, course.tutorialHours ?? 0);
+  const P = Math.max(0, course.practicalHours ?? 0);
+  if (L + T + P > 0) return (L + T + P) * LTPC_WEEKS;
+  return 0;
 };
 const cleanDurationSlots = (value: unknown, slots: Slot[]): number => {
   const parsed = typeof value === "number" ? value : parseInt(String(value ?? "1"), 10);
