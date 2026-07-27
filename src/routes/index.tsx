@@ -1555,11 +1555,10 @@ function Index() {
       "weight",
     ];
     const wb = XLSX.utils.book_new();
-    // Weeks come from each course's active date range (or the global range
-    // when the course doesn't specify one). No 15-week cap: the Cycle column
-    // emits one W# row per week the course actually spans, so LTPC totals
-    // scale with the timetable duration (e.g. 20-week plan, L=1,P=4 → 20
-    // theory + 80 practical = 100).
+    // Weeks come from each course's active range intersected with the actual
+    // timetable range. Lesson totals are split into theory/practical rows from
+    // the course target first; if a course is already placed on the timetable,
+    // those visible placements drive the ASC totals so export matches the grid.
     state.classes.forEach((cls) => {
       const rows: (string | number)[][] = [header];
       cls.courses.forEach((course) => {
@@ -1574,18 +1573,36 @@ function Index() {
         const T = Math.max(0, course.tutorialHours ?? 0);
         const P = Math.max(0, course.practicalHours ?? 0);
         const span = cleanDurationSlots(course.durationSlots, state.slots);
+        const hasLTPC = L + T + P > 0;
+        const theoryPerWeek = L + T;
+        const totalTarget = courseTotalTarget(course, weekCount);
+        const theoryTotal = hasLTPC
+          ? theoryPerWeek * weekCount
+          : Math.max(0, totalTarget || courseWeeklyTarget(course) * weekCount);
+        const practicalTotal = hasLTPC ? P * weekCount : 0;
+        const range = effectiveCourseRange(course, state);
+        const courseDates = range ? daysBetween(range.from, range.to) : [];
+        const placedStarts = new Map<number, number[]>();
+        const placedTotal = countCourseSessionsInDates(cls.grid, course, state.slots, courseDates, (date, slotIdx) => {
+          const cycle = courseCycleForDate(course, state, date);
+          if (!cycle) return;
+          const list = placedStarts.get(cycle) ?? [];
+          list.push(slotIdx);
+          placedStarts.set(cycle, list);
+        });
+        const hasPlacedTimetable = placedTotal > 0;
         let weekly = courseWeeklyTarget(course);
         if (weekly <= 0 && (course.totalSessions ?? 0) > 0) {
           weekly = Math.max(1, course.totalSessions ?? 0);
         }
         if (weekly <= 0 && L + T + P === 0) weekly = 1;
-        const emit = (subjectCode: string, length: number, lessons: number) => {
+        const emit = (subjectCode: string, length: number, lessonsByWeek: number[]) => {
+          if (lessonsByWeek.every((lessons) => lessons <= 0)) return;
+          lessonsByWeek.forEach((lessons, index) => {
           if (lessons <= 0) return;
           const weight = Number.isFinite(lessons) && lessons > 0
             ? Number((lessons / 18).toFixed(4))
             : 0;
-          // One row per week in the planning range.
-          for (let w = 1; w <= weekCount; w++) {
             rows.push([
               teacher,
               className,
@@ -1595,26 +1612,41 @@ function Index() {
               length,
               lessons,
               classroom,
-              `W${w}`,
+              `W${index + 1}`,
               weight,
             ]);
-          }
+          });
         };
-        // LTPC semester model: total slots/week = L + T + P.
-        // Practicals are typically 2-period blocks, so a P count of practical
-        // slots/week is emitted as Length=2 with Lessons/week = ceil(P/2).
-        // If P is odd we emit an extra single-period practical row.
-        if (P > 0 && L + T > 0) {
-          emit(subjectName, span, L + T);
-          const pairs = Math.floor(P / 2);
-          if (pairs > 0) emit(`${subjectName}_P`, 2, pairs);
-          if (P % 2 === 1) emit(`${subjectName}_P`, 1, 1);
-        } else if (P > 0) {
-          const pairs = Math.floor(P / 2);
-          if (pairs > 0) emit(`${subjectName}_P`, 2, pairs);
-          if (P % 2 === 1) emit(`${subjectName}_P`, 1, 1);
+        if (hasPlacedTimetable) {
+          const theoryRemaining = new Map<number, number>();
+          splitTotalAcrossWeeks(theoryTotal, weekCount).forEach((value, index) => theoryRemaining.set(index + 1, value));
+          const theoryPlaced = Array.from({ length: weekCount }, () => 0);
+          const practicalSingleSlots = Array.from({ length: weekCount }, () => 0);
+          for (let week = 1; week <= weekCount; week++) {
+            const starts = [...(placedStarts.get(week) ?? [])].sort((a, b) => a - b);
+            starts.forEach(() => {
+              const remainingTheory = theoryRemaining.get(week) ?? 0;
+              if (remainingTheory > 0) {
+                theoryPlaced[week - 1]++;
+                theoryRemaining.set(week, remainingTheory - 1);
+              } else {
+                practicalSingleSlots[week - 1]++;
+              }
+            });
+          }
+          if (theoryPlaced.some((lessons) => lessons > 0) || !hasLTPC) {
+            emit(subjectName, span, theoryPlaced);
+          }
+          if (practicalSingleSlots.some((lessons) => lessons > 0)) {
+            emit(`${subjectName}_P`, 1, practicalSingleSlots);
+          }
+        } else if (hasLTPC) {
+          const theoryLessons = splitTotalAcrossWeeks(theoryTotal, weekCount);
+          const practicalLessons = splitTotalAcrossWeeks(practicalTotal, weekCount);
+          if (theoryTotal > 0) emit(subjectName, span, theoryLessons);
+          if (practicalTotal > 0) emit(`${subjectName}_P`, 1, practicalLessons);
         } else {
-          emit(subjectName, span, weekly);
+          emit(subjectName, span, splitTotalAcrossWeeks(Math.max(weekly * weekCount, totalTarget), weekCount));
         }
       });
       const ws = XLSX.utils.aoa_to_sheet(rows);
