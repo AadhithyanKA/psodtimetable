@@ -41,8 +41,8 @@ type Course = {
   // Target number of sessions per week (used by auto-fill). 0 = don't auto-fill.
   weeklyPeriods?: number;
   // LTPC structure. When any of L/T/P > 0 the weekly session target is
-  // derived as L + T + 2*P (1 practical hour = 2 sessions) and overrides
-  // `weeklyPeriods` in auto-fill and planned counters. C is informational.
+  // derived as L + T + P and overrides `weeklyPeriods` in auto-fill and
+  // planned counters. C is informational.
   lectureHours?: number;
   tutorialHours?: number;
   practicalHours?: number;
@@ -221,9 +221,8 @@ type SavedState = Partial<Omit<State, "classes">> & {
 
 const nonBreakCount = (slots: Slot[]) => slots.filter((slot) => !slot.isBreak).length;
 // LTPC-derived weekly session target. Each unit of L, T, or P contributes
-// 1 session/week (P slots are still typically 2 consecutive periods via
-// durationSlots, but we count them as P sessions per week to match the
-// semester model where LTPC × 15 weeks = total sessions).
+// 1 scheduled period/week; multi-period practical blocks are counted by their
+// occupied periods so export totals match the visible timetable.
 // Falls back to weeklyPeriods when no LTPC values are set.
 const courseWeeklyTarget = (course: Course): number => {
   const L = Math.max(0, course.lectureHours ?? 0);
@@ -241,18 +240,40 @@ const weeksInRange = (from?: string, to?: string): number => {
   const days = Math.floor((d2 - d1) / 86400000) + 1;
   return Math.max(1, Math.ceil(days / 7));
 };
-// Weeks a course is scheduled over: its own from/to overrides state's range.
+const effectiveCourseRange = (
+  course: Course,
+  state: { fromDate: string; toDate: string },
+): { from: string; to: string } | null => {
+  const from = [state.fromDate, course.fromDate].filter(isValidIso).sort()[1] ?? state.fromDate;
+  const to = [state.toDate, course.toDate].filter(isValidIso).sort()[0] ?? state.toDate;
+  if (!isValidIso(from) || !isValidIso(to) || to < from) return null;
+  return { from, to };
+};
+// Weeks a course is scheduled over: course from/to is intersected with the
+// timetable range so totals are based on the actual timetable being designed.
 const courseSemesterWeeks = (
   course: Course,
   state: { fromDate: string; toDate: string },
 ): number => {
-  const from = course.fromDate || state.fromDate;
-  const to = course.toDate || state.toDate;
-  return weeksInRange(from, to);
+  const range = effectiveCourseRange(course, state);
+  if (!range) return 0;
+  return weeksInRange(range.from, range.to);
+};
+const courseCycleForDate = (
+  course: Course,
+  state: { fromDate: string; toDate: string },
+  iso: string,
+): number | null => {
+  const range = effectiveCourseRange(course, state);
+  if (!range || iso < range.from || iso > range.to) return null;
+  const start = utcDateFromIso(range.from);
+  const current = utcDateFromIso(iso);
+  if (!start || !current || current < start) return null;
+  return Math.floor((current.getTime() - start.getTime()) / (7 * 86400000)) + 1;
 };
 // Total sessions across the course's active range. Explicit totalSessions
-// overrides; otherwise LTPC → (L+T+P) × weeks-in-range.
-// Example over 15 weeks: L=1,T=0,P=4 → 5 × 15 = 75 (15 theory + 60 practical).
+// overrides; otherwise LTPC → (L+T+P) × effective timetable weeks.
+// Example over 15 weeks: L=1,T=0,P=4 → 5 × 15 = 75 (15 theory + 60 practical periods).
 const courseTotalTarget = (course: Course, weeks: number): number => {
   if (course.totalSessions && course.totalSessions > 0) return course.totalSessions;
   const L = Math.max(0, course.lectureHours ?? 0);
@@ -260,6 +281,14 @@ const courseTotalTarget = (course: Course, weeks: number): number => {
   const P = Math.max(0, course.practicalHours ?? 0);
   if (L + T + P > 0) return (L + T + P) * Math.max(0, weeks);
   return 0;
+};
+const splitTotalAcrossWeeks = (total: number, weeks: number): number[] => {
+  const cleanTotal = Math.max(0, Math.floor(total));
+  const cleanWeeks = Math.max(0, Math.floor(weeks));
+  if (cleanTotal <= 0 || cleanWeeks <= 0) return [];
+  const base = Math.floor(cleanTotal / cleanWeeks);
+  const remainder = cleanTotal % cleanWeeks;
+  return Array.from({ length: cleanWeeks }, (_, index) => base + (index < remainder ? 1 : 0));
 };
 const cleanDurationSlots = (value: unknown, slots: Slot[]): number => {
   const parsed = typeof value === "number" ? value : parseInt(String(value ?? "1"), 10);
@@ -1511,7 +1540,7 @@ function Index() {
   };
   const exportASC = () => {
     // aSc TimeTables "Data to Fill" import workbook. One sheet per class,
-    // one row per course (with a `_P` practical row when P > 0 and L/T > 0).
+    // with theory rows as course code and practical rows as coursecode_P.
     const header = [
       "Teacher",
       "Class",
@@ -1525,11 +1554,10 @@ function Index() {
       "weight",
     ];
     const wb = XLSX.utils.book_new();
-    // Weeks come from each course's active date range (or the global range
-    // when the course doesn't specify one). No 15-week cap: the Cycle column
-    // emits one W# row per week the course actually spans, so LTPC totals
-    // scale with the timetable duration (e.g. 20-week plan, L=1,P=4 → 20
-    // theory + 80 practical = 100).
+    // Weeks come from each course's active range intersected with the actual
+    // timetable range. Lesson totals are planned from LTPC/course totals and
+    // split across W1, W2... so Length × Lessons/week matches the full course
+    // requirement for the timetable being designed.
     state.classes.forEach((cls) => {
       const rows: (string | number)[][] = [header];
       cls.courses.forEach((course) => {
@@ -1544,18 +1572,25 @@ function Index() {
         const T = Math.max(0, course.tutorialHours ?? 0);
         const P = Math.max(0, course.practicalHours ?? 0);
         const span = cleanDurationSlots(course.durationSlots, state.slots);
+        const hasLTPC = L + T + P > 0;
+        const theoryPerWeek = L + T;
+        const totalTarget = courseTotalTarget(course, weekCount);
+        const theoryTotal = hasLTPC
+          ? theoryPerWeek * weekCount
+          : Math.max(0, totalTarget || courseWeeklyTarget(course) * weekCount);
+        const practicalTotal = hasLTPC ? P * weekCount : 0;
         let weekly = courseWeeklyTarget(course);
         if (weekly <= 0 && (course.totalSessions ?? 0) > 0) {
           weekly = Math.max(1, course.totalSessions ?? 0);
         }
         if (weekly <= 0 && L + T + P === 0) weekly = 1;
-        const emit = (subjectCode: string, length: number, lessons: number) => {
-          if (lessons <= 0) return;
-          const weight = Number.isFinite(lessons) && lessons > 0
-            ? Number((lessons / 18).toFixed(4))
-            : 0;
-          // One row per week in the planning range.
-          for (let w = 1; w <= weekCount; w++) {
+        const emit = (subjectCode: string, length: number, lessonsByWeek: number[]) => {
+          if (lessonsByWeek.every((lessons) => lessons <= 0)) return;
+          lessonsByWeek.forEach((lessons, index) => {
+            if (lessons <= 0) return;
+            const weight = Number.isFinite(lessons) && lessons > 0
+              ? Number((lessons / 18).toFixed(4))
+              : 0;
             rows.push([
               teacher,
               className,
@@ -1565,26 +1600,21 @@ function Index() {
               length,
               lessons,
               classroom,
-              `W${w}`,
+              `W${index + 1}`,
               weight,
             ]);
-          }
+          });
         };
-        // LTPC semester model: total slots/week = L + T + P.
-        // Practicals are typically 2-period blocks, so a P count of practical
-        // slots/week is emitted as Length=2 with Lessons/week = ceil(P/2).
-        // If P is odd we emit an extra single-period practical row.
-        if (P > 0 && L + T > 0) {
-          emit(subjectName, span, L + T);
-          const pairs = Math.floor(P / 2);
-          if (pairs > 0) emit(`${subjectName}_P`, 2, pairs);
-          if (P % 2 === 1) emit(`${subjectName}_P`, 1, 1);
-        } else if (P > 0) {
-          const pairs = Math.floor(P / 2);
-          if (pairs > 0) emit(`${subjectName}_P`, 2, pairs);
-          if (P % 2 === 1) emit(`${subjectName}_P`, 1, 1);
+        if (hasLTPC) {
+          const theoryLessons = splitTotalAcrossWeeks(theoryTotal, weekCount);
+          const practicalPeriods = splitTotalAcrossWeeks(practicalTotal, weekCount);
+          const practicalPairs = practicalPeriods.map((periods) => Math.floor(periods / 2));
+          const practicalSingles = practicalPeriods.map((periods) => periods % 2);
+          if (theoryTotal > 0) emit(subjectName, 1, theoryLessons);
+          if (practicalPairs.some((lessons) => lessons > 0)) emit(`${subjectName}_P`, 2, practicalPairs);
+          if (practicalSingles.some((lessons) => lessons > 0)) emit(`${subjectName}_P`, 1, practicalSingles);
         } else {
-          emit(subjectName, span, weekly);
+          emit(subjectName, span, splitTotalAcrossWeeks(Math.max(weekly * weekCount, totalTarget), weekCount));
         }
       });
       const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -1684,11 +1714,12 @@ function Index() {
     };
     const planFor = (cls: ClassData) =>
       cls.courses.reduce((sum, c) => {
+        if (c.disabled) return sum;
         const totalT = courseTotalTarget(c, courseSemesterWeeks(c, state));
         const requested = totalT > 0 ? totalT : courseWeeklyTarget(c) * weekCount;
         const capacity = countCourseRuleCapacity(c, state.slots, dates);
         if (requested <= 0) return sum + capacity;
-        return sum + Math.min(requested, capacity);
+        return sum + requested;
       }, 0);
     const activePlanned = activeClass ? planFor(activeClass) : 0;
     const activePlaced = activeClass ? countPlaced(activeClass) : 0;
@@ -1873,7 +1904,7 @@ function Index() {
                       {([
                         ["lectureHours", "L", "Lecture hours per week"],
                         ["tutorialHours", "T", "Tutorial hours per week"],
-                        ["practicalHours", "P", "Practical hours per week (each hour = 2 sessions)"],
+                        ["practicalHours", "P", "Practical sessions per week"],
                         ["credits", "C", "Credits (informational)"],
                       ] as [keyof Course, string, string][]).map(([field, label, tip]) => (
                         <label
@@ -1914,7 +1945,7 @@ function Index() {
                         <span title="Consecutive periods per session">span</span>
                       </label>
                       <label
-                        title="Sessions per week (auto-fill target). Derived from LTPC (L+T+P) when any of L/T/P is set. Total across semester = (L+T+P) × 15 weeks."
+                        title="Sessions per week (auto-fill target). Derived from LTPC (L+T+P) when any of L/T/P is set. Total uses this course date range inside the timetable."
                         className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
@@ -1938,7 +1969,7 @@ function Index() {
                         <span>/wk</span>
                       </label>
                       <label
-                        title="Total sessions across the whole date range. Auto-derived from LTPC as (L+T+P) × 15 when blank; type a value to override."
+                        title="Total sessions across this course date range inside the timetable. Auto-derived from LTPC as (L+T+P) × course weeks when blank; type a value to override."
                         className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
