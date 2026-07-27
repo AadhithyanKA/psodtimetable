@@ -215,6 +215,16 @@ type SavedState = Partial<Omit<State, "classes">> & {
 };
 
 const nonBreakCount = (slots: Slot[]) => slots.filter((slot) => !slot.isBreak).length;
+// LTPC-derived weekly session target. 1 L or T hour = 1 session; 1 P hour = 2
+// sessions (practicals are double periods). Falls back to weeklyPeriods when
+// no LTPC values are set.
+const courseWeeklyTarget = (course: Course): number => {
+  const L = Math.max(0, course.lectureHours ?? 0);
+  const T = Math.max(0, course.tutorialHours ?? 0);
+  const P = Math.max(0, course.practicalHours ?? 0);
+  if (L + T + P > 0) return L + T + 2 * P;
+  return Math.max(0, course.weeklyPeriods ?? 0);
+};
 const cleanDurationSlots = (value: unknown, slots: Slot[]): number => {
   const parsed = typeof value === "number" ? value : parseInt(String(value ?? "1"), 10);
   const whole = Number.isFinite(parsed) ? Math.floor(parsed) : 1;
