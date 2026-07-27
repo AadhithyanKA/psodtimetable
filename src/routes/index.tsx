@@ -1422,36 +1422,68 @@ function Index() {
     });
   };
   const exportASC = () => {
-    const pad = (s: string, n: number) => {
-      const t = s.length > n ? s.slice(0, n - 1) + "…" : s;
-      return t + " ".repeat(Math.max(0, n - t.length));
-    };
-    const parts: string[] = [];
-    parts.push(`Timetable  ${state.fromDate}  to  ${state.toDate}`);
-    parts.push("=".repeat(72));
+    // aSc TimeTables "Data to Fill" import workbook. One sheet per class,
+    // one row per course (with a `_P` practical row when P > 0 and L/T > 0).
+    const header = [
+      "Teacher",
+      "Class",
+      "Group",
+      "Subject",
+      "Subject",
+      "Length",
+      "Lessons/week",
+      "Available classrooms",
+      "Cycle",
+      "",
+    ];
+    const wb = XLSX.utils.book_new();
     state.classes.forEach((cls) => {
-      const rows = buildSheet(cls);
-      const colWidths = rows[0].map((_, ci) =>
-        Math.min(22, Math.max(...rows.map((r) => String(r[ci] ?? "").length))),
-      );
-      const sep = "+" + colWidths.map((w) => "-".repeat(w + 2)).join("+") + "+";
-      const fmt = (r: string[]) =>
-        "| " + r.map((v, ci) => pad(String(v ?? ""), colWidths[ci])).join(" | ") + " |";
-      parts.push("");
-      parts.push(`Class: ${cls.name}`);
-      parts.push(sep);
-      parts.push(fmt(rows[0]));
-      parts.push(sep);
-      rows.slice(1).forEach((r) => parts.push(fmt(r)));
-      parts.push(sep);
+      const rows: (string | number)[][] = [header];
+      cls.courses.forEach((course) => {
+        const teacher = course.faculty || "";
+        const className = cls.name;
+        const group = "Entire class";
+        const subjectName = course.name;
+        const classroom = course.classroom || "";
+        const L = Math.max(0, course.lectureHours ?? 0);
+        const T = Math.max(0, course.tutorialHours ?? 0);
+        const P = Math.max(0, course.practicalHours ?? 0);
+        const span = cleanDurationSlots(course.durationSlots, state.slots);
+        const weekly = courseWeeklyTarget(course);
+        const emit = (subjectCode: string, length: number, lessons: number) => {
+          if (lessons <= 0) return;
+          const rowIdx = rows.length + 1;
+          rows.push([
+            teacher,
+            className,
+            group,
+            subjectCode,
+            subjectName,
+            length,
+            lessons,
+            classroom,
+            "W1",
+            { f: `G${rowIdx}/18` } as unknown as string,
+          ]);
+        };
+        if (P > 0 && L + T > 0) {
+          emit(subjectName, span, L + T);
+          emit(`${subjectName}_P`, 2, 2 * P);
+        } else if (P > 0) {
+          emit(`${subjectName}_P`, 2, 2 * P);
+        } else {
+          emit(subjectName, span, weekly);
+        }
+      });
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws["!cols"] = [
+        { wch: 22 }, { wch: 10 }, { wch: 14 }, { wch: 14 },
+        { wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 22 }, { wch: 8 }, { wch: 10 },
+      ];
+      const sheetName = `Data to Fill ${cls.name}`.slice(0, 31);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
     });
-    const blob = new Blob([parts.join("\n")], { type: "text/plain;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `timetable_${state.fromDate}_to_${state.toDate}.asc`;
-    a.click();
-    URL.revokeObjectURL(url);
+    XLSX.writeFile(wb, `timetable_${state.fromDate}_to_${state.toDate}_ASC.xlsx`);
   };
 
   // Save / Load .aadhi file (full app state snapshot)
@@ -2222,7 +2254,7 @@ function Index() {
               <button
                 onClick={exportASC}
                 className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
-                title="Export as ASCII text (.asc)"
+                title="Export aSc TimeTables 'Data to Fill' workbook (.xlsx)"
               >
                 ASC
               </button>
