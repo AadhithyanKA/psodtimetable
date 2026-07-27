@@ -1790,7 +1790,7 @@ function Index() {
                       </label>
                       <label
                         title="Sessions per week (auto-fill target). Derived from LTPC (L+T+2P) when any of L/T/P is set."
-                        className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
+                        className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
                         {((c.lectureHours ?? 0) + (c.tutorialHours ?? 0) + (c.practicalHours ?? 0)) > 0 ? (
@@ -1814,7 +1814,7 @@ function Index() {
                       </label>
                       <label
                         title="Total sessions across the whole date range. Overrides /wk when set."
-                        className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
+                        className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
                         <input
@@ -1827,13 +1827,51 @@ function Index() {
                           }}
                           className="w-12 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
                         />
-                        <span>
-                          {(c.totalSessions ?? 0) > 0
-                            ? `${coursePlacementCounts.get(c.id) ?? 0} / ${c.totalSessions}`
-                            : `${coursePlacementCounts.get(c.id) ?? 0} placed`}
-                          {" "}· total
-                        </span>
+                        <span>total</span>
                       </label>
+                    </div>
+                    {/* Placed progress row */}
+                    <div className="px-3 pb-2">
+                      {(() => {
+                        const placed = coursePlacementCounts.get(c.id) ?? 0;
+                        const target =
+                          (c.totalSessions ?? 0) > 0
+                            ? (c.totalSessions as number)
+                            : 0;
+                        const pct =
+                          target > 0 ? Math.min(100, Math.round((placed / target) * 100)) : 0;
+                        const done = target > 0 && placed >= target;
+                        return (
+                          <div
+                            className={
+                              "flex items-center justify-between gap-2 border-2 px-2 py-1 text-[10px] uppercase tracking-wider " +
+                              (done
+                                ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                                : "border-[#0d0d0d]/15 bg-[#f5f3ee] text-[#2d2d2d]/70")
+                            }
+                            style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                            title="Placed sessions in the current date range"
+                          >
+                            <span className="font-bold">Placed</span>
+                            <span className="flex-1">
+                              {target > 0 ? (
+                                <span className="relative block h-1.5 w-full overflow-hidden bg-[#0d0d0d]/10">
+                                  <span
+                                    className={
+                                      "absolute inset-y-0 left-0 " +
+                                      (done ? "bg-emerald-600" : "bg-[#0d0d0d]")
+                                    }
+                                    style={{ width: pct + "%" }}
+                                  />
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="font-bold tabular-nums">
+                              {target > 0 ? `${placed} / ${target}` : `${placed}`}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div className="grid grid-cols-2 gap-2 px-3 pb-2">
                       <label
