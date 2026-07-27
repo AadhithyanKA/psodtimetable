@@ -667,6 +667,7 @@ function Index() {
               id: `c${Date.now()}`,
               name: "New Course",
               faculty: "Faculty",
+              classroom: "",
               color: COLORS[cls.courses.length % COLORS.length],
               durationSlots: 1,
               weeklyPeriods: 3,
