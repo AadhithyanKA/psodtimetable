@@ -1637,24 +1637,19 @@ function Index() {
             });
           }
           if (theoryPlaced.some((lessons) => lessons > 0) || !hasLTPC) {
-            emit(subjectName, span, theoryPlaced);
+            emit(subjectName, hasLTPC ? 1 : span, theoryPlaced);
           }
           [...practicalBlocksByLength.entries()]
             .sort(([a], [b]) => a - b)
             .forEach(([length, lessons]) => emit(`${subjectName}_P`, length, lessons));
         } else if (hasLTPC) {
           const theoryLessons = splitTotalAcrossWeeks(theoryTotal, weekCount);
-          const practicalLength = P > 1 ? 2 : 1;
-          const practicalBlocks = splitTotalAcrossWeeks(Math.ceil(practicalTotal / practicalLength), weekCount);
-          let remainingPracticalPeriods = practicalTotal;
-          const practicalLessons = practicalBlocks.map((blocks) => {
-            const maxBlocksForRemaining = Math.ceil(Math.max(0, remainingPracticalPeriods) / practicalLength);
-            const adjusted = Math.min(blocks, maxBlocksForRemaining);
-            remainingPracticalPeriods -= adjusted * practicalLength;
-            return adjusted;
-          });
-          if (theoryTotal > 0) emit(subjectName, span, theoryLessons);
-          if (practicalTotal > 0) emit(`${subjectName}_P`, practicalLength, practicalLessons);
+          const practicalPeriods = splitTotalAcrossWeeks(practicalTotal, weekCount);
+          const practicalPairs = practicalPeriods.map((periods) => Math.floor(periods / 2));
+          const practicalSingles = practicalPeriods.map((periods) => periods % 2);
+          if (theoryTotal > 0) emit(subjectName, 1, theoryLessons);
+          if (practicalPairs.some((lessons) => lessons > 0)) emit(`${subjectName}_P`, 2, practicalPairs);
+          if (practicalSingles.some((lessons) => lessons > 0)) emit(`${subjectName}_P`, 1, practicalSingles);
         } else {
           emit(subjectName, span, splitTotalAcrossWeeks(Math.max(weekly * weekCount, totalTarget), weekCount));
         }
