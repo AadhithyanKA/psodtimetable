@@ -62,6 +62,8 @@ type Course = {
   // Optional active date range for this course. Undefined = entire timetable range.
   fromDate?: string; // YYYY-MM-DD
   toDate?: string; // YYYY-MM-DD
+  // When true, the course is skipped by Fill by Rules / auto-populate.
+  disabled?: boolean;
 };
 type ClassData = { id: string; name: string; grid: Record<string, Cell>; courses: Course[] };
 type Slot = { start: string; end: string; isBreak?: boolean }; // 24h "HH:MM"
@@ -259,6 +261,7 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
     name: rest.name || "New Course",
     faculty: rest.faculty || "Faculty",
     classroom: typeof rest.classroom === "string" ? rest.classroom : "",
+    disabled: rest.disabled === true ? true : undefined,
     color: rest.color || COLORS[0],
     durationSlots: cleanDurationSlots(rest.durationSlots, slots),
     weeklyPeriods: Math.max(0, Math.floor(rest.weeklyPeriods ?? 0)),
@@ -971,6 +974,7 @@ function Index() {
 
       classes.forEach((cls) => {
         cls.courses.forEach((course) => {
+          if (course.disabled) return;
           if (course.totalSessions && course.totalSessions > 0) {
             addTask(cls, course, workingDates, course.totalSessions, "total");
             return;
@@ -1731,7 +1735,12 @@ function Index() {
               <div className="space-y-2">
                 {(activeClass?.courses ?? []).map((c) => (
                   <div key={c.id} className="border border-[#0d0d0d]/30 bg-white">
-                    <div className="flex items-center gap-2 border-b border-[#0d0d0d]/10 px-3 py-2">
+                    <div
+                      className={
+                        "flex items-center gap-2 border-b border-[#0d0d0d]/10 px-3 py-2 " +
+                        (c.disabled ? "opacity-60" : "")
+                      }
+                    >
                       <span
                         className="h-3 w-3 shrink-0"
                         style={{ backgroundColor: c.color }}
@@ -1740,8 +1749,30 @@ function Index() {
                         value={c.name}
                         onChange={(e) => updateCourse(c.id, { name: e.target.value })}
                         placeholder="Course"
-                        className="min-w-0 flex-1 bg-transparent text-sm font-bold outline-none"
+                        className={
+                          "min-w-0 flex-1 bg-transparent text-sm font-bold outline-none " +
+                          (c.disabled ? "line-through" : "")
+                        }
                       />
+                      <button
+                        onClick={() =>
+                          updateCourse(c.id, { disabled: c.disabled ? undefined : true })
+                        }
+                        title={
+                          c.disabled
+                            ? "Course is disabled — excluded from Fill by Rules. Click to enable."
+                            : "Disable this course (excluded from Fill by Rules)."
+                        }
+                        className={
+                          "flex items-center gap-1 border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider " +
+                          (c.disabled
+                            ? "border-[#0d0d0d]/40 bg-[#0d0d0d] text-white"
+                            : "border-[#0d0d0d]/30 bg-white text-[#2d2d2d]/70 hover:border-[#0d0d0d]")
+                        }
+                        style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                      >
+                        {c.disabled ? "Off" : "On"}
+                      </button>
                       <button
                         onClick={() => removeCourse(c.id)}
                         className="text-xs text-[#2d2d2d]/40 hover:text-red-600"
