@@ -1700,7 +1700,6 @@ function Index() {
                       />
                     </div>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
-                      {(["lectureHours", "L", "Lecture hours/wk"], ["tutorialHours", "T", "Tutorial hours/wk"], ["practicalHours", "P", "Practical hours/wk (each hour = 2 sessions)"], ["credits", "C", "Credits"]) as unknown}
                       {([
                         ["lectureHours", "L", "Lecture hours per week"],
                         ["tutorialHours", "T", "Tutorial hours per week"],
