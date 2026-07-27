@@ -1197,6 +1197,25 @@ function Index() {
     });
   };
 
+  const runAutoPopulate = (
+    label: string,
+    opts: { overwrite: boolean; strictRules?: boolean }
+  ) => {
+    setAutoStatus({ label, phase: "Preparing…" });
+    // Yield twice so the overlay paints before the synchronous solver runs.
+    requestAnimationFrame(() => {
+      setAutoStatus({ label, phase: "Placing sessions…" });
+      requestAnimationFrame(() => {
+        try {
+          autoPopulate(opts);
+        } finally {
+          setAutoStatus({ label, phase: "Finalizing…" });
+          setTimeout(() => setAutoStatus(null), 350);
+        }
+      });
+    });
+  };
+
   // ------------ CSV block upload ------------
   const downloadBlockTemplate = () => {
     const nonBreakCount = state.slots.filter((sl) => !sl.isBreak).length || 8;
