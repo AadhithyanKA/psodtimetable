@@ -829,8 +829,12 @@ function Index() {
       let placedCount = 0;
       const unmet: string[] = [];
 
+      const mutableClasses = opts.strictRules
+        ? classes.filter((cls) => cls.id === activeClassId)
+        : classes;
+
       if (opts.overwrite) {
-        classes.forEach((cls) => {
+        mutableClasses.forEach((cls) => {
           Object.keys(cls.grid).forEach((k) => {
             const cell = cls.grid[k];
             if (cell && cell.kind === "course") delete cls.grid[k];
@@ -853,7 +857,7 @@ function Index() {
         };
 
         const removeRuleBreakers = () => {
-          classes.forEach((cls) => {
+          mutableClasses.forEach((cls) => {
             workingDates.forEach((date) => {
               for (let slotIdx = 0; slotIdx < s.slots.length; slotIdx++) {
                 const key = `${date}-${slotIdx}`;
@@ -1050,7 +1054,7 @@ function Index() {
         else weeks.set(key, [d]);
       });
 
-      classes.forEach((cls) => {
+      mutableClasses.forEach((cls) => {
         cls.courses.forEach((course) => {
           if (course.disabled) return;
           const totalTarget = courseTotalTarget(course, courseSemesterWeeks(course, s));
