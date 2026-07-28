@@ -772,7 +772,14 @@ function Index() {
         ...s,
         classes: [
           ...s.classes,
-          { id, name: `Class ${String.fromCharCode(65 + s.classes.length)}`, grid: {}, courses: [] },
+          {
+            id,
+            name: `Class ${String.fromCharCode(65 + s.classes.length)}`,
+            grid: {},
+            courses: [],
+            fromDate: s.fromDate,
+            toDate: s.toDate,
+          },
         ],
       };
     });
