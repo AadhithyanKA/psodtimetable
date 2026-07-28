@@ -739,7 +739,7 @@ function Index() {
     setState((s) => ({
       ...s,
       classes: s.classes.map((cls) => {
-        if (cls.id !== s.activeClassId) return cls;
+        if (cls.id !== activeClassId) return cls;
         const grid: Record<string, Cell> = {};
         Object.entries(cls.grid).forEach(([key, cell]) => {
           if (cell.kind !== "course") grid[key] = cell;
