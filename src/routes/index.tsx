@@ -145,6 +145,27 @@ const weekdayOf = (iso: string): number =>
   utcDateFromIso(iso)?.getUTCDay() ?? 0;
 const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
 const WEEKDAY_FULL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// Faculty helpers. A course's `faculty` field may hold one name or several
+// names separated by commas / semicolons / slashes to model co-taught
+// sessions. All conflict checks compare the SET of faculty names — two
+// courses conflict if they share ANY teacher.
+const getFaculties = (course: Pick<Course, "faculty">): string[] => {
+  const raw = (course.faculty || "").trim();
+  if (!raw) return [];
+  return raw
+    .split(/[,;/]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+};
+const facultyKey = (course: Pick<Course, "faculty">): string =>
+  getFaculties(course).slice().sort().join("|");
+const sharesFaculty = (
+  a: Pick<Course, "faculty">,
+  b: Pick<Course, "faculty">,
+): boolean => {
+  const set = new Set(getFaculties(a));
+  return getFaculties(b).some((f) => set.has(f));
+};
 const courseAllowedDate = (course: Course, iso: string): boolean => {
   if (course.fromDate && iso < course.fromDate) return false;
   if (course.toDate && iso > course.toDate) return false;
@@ -601,7 +622,9 @@ function Index() {
           if (cell?.kind === "course") {
             const course = cls.courses.find((c) => c.id === cell.courseId);
             if (!course) return;
-            (facultyToClass[course.faculty] ??= []).push(cls.id);
+            getFaculties(course).forEach((f) => {
+              (facultyToClass[f] ??= []).push(cls.id);
+            });
             // Rule violation: course placed on a weekday or period it isn't allowed
             if (!courseAllowedOn(course, date) || !courseAllowedSlotOn(course, i, date)) {
               set.add(`${cls.id}:${key}`);
@@ -609,7 +632,8 @@ function Index() {
           }
         });
         Object.values(facultyToClass).forEach((clsIds) => {
-          if (clsIds.length > 1) clsIds.forEach((id) => set.add(`${id}:${key}`));
+          const unique = Array.from(new Set(clsIds));
+          if (unique.length > 1) unique.forEach((id) => set.add(`${id}:${key}`));
         });
       });
     });
@@ -641,7 +665,7 @@ function Index() {
           const cell = cls.grid[key];
           if (cell?.kind !== "course") return false;
           const otherCourse = cls.courses.find((c) => c.id === cell.courseId);
-          return otherCourse?.faculty === course.faculty;
+          return otherCourse ? sharesFaculty(otherCourse, course) : false;
         });
         if (facultyBusy && !overrideMode) {
           setAutoFillReport("Cannot place course — this faculty is already assigned in another class at that time.");
@@ -955,9 +979,11 @@ function Index() {
               if (cell?.kind !== "course") return;
               const course = cls.courses.find((c) => c.id === cell.courseId);
               if (!course) return;
-              const list = byFaculty.get(course.faculty) ?? [];
-              list.push(cls);
-              byFaculty.set(course.faculty, list);
+              getFaculties(course).forEach((f) => {
+                const list = byFaculty.get(f) ?? [];
+                if (!list.includes(cls)) list.push(cls);
+                byFaculty.set(f, list);
+              });
             });
             byFaculty.forEach((busyClasses) => {
               if (busyClasses.length < 2) return;
@@ -982,7 +1008,10 @@ function Index() {
         Object.entries(cls.grid).forEach(([key, cell]) => {
           if (cell.kind !== "course") return;
           const course = cls.courses.find((c) => c.id === cell.courseId);
-          if (course) (facultyBusy[key] ??= new Set()).add(course.faculty);
+          if (course) {
+            const bucket = (facultyBusy[key] ??= new Set());
+            getFaculties(course).forEach((f) => bucket.add(f));
+          }
         });
       });
       const globalDateOrder = new Map(workingDates.map((date, index) => [date, index]));
@@ -1020,7 +1049,7 @@ function Index() {
           const key = `${date}-${idx}`;
           const existing = cls.grid[key];
           if (existing && existing.kind !== "empty") return false;
-          if (facultyBusy[key]?.has(course.faculty)) return false;
+          if (facultyBusy[key] && getFaculties(course).some((f) => facultyBusy[key].has(f))) return false;
         }
         return true;
       };
@@ -1040,14 +1069,14 @@ function Index() {
               ? "selected rule slots already filled"
               : "class already has another course there";
           }
-          if (facultyBusy[key]?.has(course.faculty)) {
+          if (facultyBusy[key] && getFaculties(course).some((f) => facultyBusy[key].has(f))) {
             const busy = classes
               .filter((other) => other.id !== cls.id)
               .map((other) => {
                 const busyCell = other.grid[key];
                 if (busyCell?.kind !== "course") return null;
                 const busyCourse = other.courses.find((c) => c.id === busyCell.courseId);
-                if (busyCourse?.faculty !== course.faculty) return null;
+                if (!busyCourse || !sharesFaculty(busyCourse, course)) return null;
                 return `${other.name}${busyCourse.name ? ` (${busyCourse.name})` : ""}`;
               })
               .filter((value): value is string => Boolean(value));
@@ -1196,7 +1225,7 @@ function Index() {
                       }
                     }
                     if (!overlaps) return;
-                    if (other.cls.id === task.cls.id || other.course.faculty === task.course.faculty) {
+                    if (other.cls.id === task.cls.id || sharesFaculty(other.course, task.course)) {
                       blockedOptions++;
                     }
                   });
@@ -1229,7 +1258,10 @@ function Index() {
         for (let i = 0; i < span; i++) {
           const key = `${nextPlacement.date}-${nextPlacement.slot + i}`;
           task.cls.grid[key] = { kind: "course", courseId: task.course.id };
-          (facultyBusy[key] ??= new Set()).add(task.course.faculty);
+          {
+            const bucket = (facultyBusy[key] ??= new Set());
+            getFaculties(task.course).forEach((f) => bucket.add(f));
+          }
         }
         task.perDay[nextPlacement.date] = (task.perDay[nextPlacement.date] ?? 0) + 1;
         task.perSlot[nextPlacement.slot] = (task.perSlot[nextPlacement.slot] ?? 0) + 1;
@@ -1276,9 +1308,11 @@ function Index() {
             if (isStart && !courseSpanFitsRules(course, s.slots, date, slotIdx)) {
               auditIssues.push(`${cls.name} ${course.name} violates rules at ${date} ${periodLabelFor(slotIdx)}`);
             }
-            const list = facultyAtSlot.get(course.faculty) ?? [];
-            list.push(`${cls.name} · ${course.name}`);
-            facultyAtSlot.set(course.faculty, list);
+            getFaculties(course).forEach((f) => {
+              const list = facultyAtSlot.get(f) ?? [];
+              list.push(`${cls.name} · ${course.name}`);
+              facultyAtSlot.set(f, list);
+            });
           });
           facultyAtSlot.forEach((list, faculty) => {
             if (list.length > 1) {
@@ -2019,7 +2053,8 @@ function Index() {
                       <input
                         value={c.faculty}
                         onChange={(e) => updateCourse(c.id, { faculty: e.target.value })}
-                        placeholder="Faculty"
+                        placeholder="Faculty (comma-sep for multiple)"
+                        title="One or more faculty names. Separate co-teachers with commas (e.g. Dr. Smith, Dr. Jones). Any shared name across classes counts as a conflict."
                         className="min-w-0 border-b border-dashed border-[#0d0d0d]/20 bg-transparent text-xs text-[#2d2d2d]/70 outline-none focus:border-[#0d0d0d]"
                       />
                       <input
