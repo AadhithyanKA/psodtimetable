@@ -684,14 +684,12 @@ function Index() {
     setState((s) => {
       const wdSet = new Set(weekdays);
       const sSet = new Set(slotIdxs);
-      const targetDates = daysBetween(s.fromDate, s.toDate).filter((iso) =>
-        wdSet.has(weekdayOf(iso)),
-      );
       return {
         ...s,
         classes: s.classes.map((cls) => {
           if (!allClasses && cls.id !== activeClassId) return cls;
           const grid = { ...cls.grid };
+          const targetDates = classDatesFor(cls, s).filter((iso) => wdSet.has(weekdayOf(iso)));
           targetDates.forEach((date) => {
             s.slots.forEach((_, i) => {
               if (!sSet.has(i)) return;
