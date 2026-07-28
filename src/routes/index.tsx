@@ -1092,6 +1092,7 @@ function Index() {
 
       mutableClasses.forEach((cls) => {
         const clsDates = workingDatesByClass.get(cls.id) ?? workingDates;
+        const clsState = stateForClass(cls, s);
         const clsWeeks = new Map<string, string[]>();
         clsDates.forEach((d) => {
           const key = weekKey(d);
@@ -1101,7 +1102,7 @@ function Index() {
         });
         cls.courses.forEach((course) => {
           if (course.disabled) return;
-          const totalTarget = courseTotalTarget(course, courseSemesterWeeks(course, s));
+          const totalTarget = courseTotalTarget(course, courseSemesterWeeks(course, clsState));
           if (totalTarget > 0) {
             addTask(cls, course, clsDates, totalTarget, "total");
             return;
