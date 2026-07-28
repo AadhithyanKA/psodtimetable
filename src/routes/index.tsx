@@ -1772,23 +1772,27 @@ function Index() {
       const wk = 1 + Math.round(((t.getTime() - first.getTime()) / 86400000 - 3 + ((first.getUTCDay() + 6) % 7)) / 7);
       return `${t.getUTCFullYear()}-W${wk}`;
     };
-    const weekCount = new Set(dates.map(isoWeekKey)).size;
     const countPlaced = (cls: ClassData) => {
+      const clsDates = classDatesFor(cls, state);
       let n = 0;
       cls.courses.forEach((course) => {
-        n += countCourseSessionsInDates(cls.grid, course, state.slots, dates);
+        n += countCourseSessionsInDates(cls.grid, course, state.slots, clsDates);
       });
       return n;
     };
-    const planFor = (cls: ClassData) =>
-      cls.courses.reduce((sum, c) => {
+    const planFor = (cls: ClassData) => {
+      const clsState = stateForClass(cls, state);
+      const clsDates = classDatesFor(cls, state);
+      const weekCount = new Set(clsDates.map(isoWeekKey)).size;
+      return cls.courses.reduce((sum, c) => {
         if (c.disabled) return sum;
-        const totalT = courseTotalTarget(c, courseSemesterWeeks(c, state));
+        const totalT = courseTotalTarget(c, courseSemesterWeeks(c, clsState));
         const requested = totalT > 0 ? totalT : courseWeeklyTarget(c) * weekCount;
-        const capacity = countCourseRuleCapacity(c, state.slots, dates);
+        const capacity = countCourseRuleCapacity(c, state.slots, clsDates);
         if (requested <= 0) return sum + capacity;
         return sum + requested;
       }, 0);
+    };
     const activePlanned = activeClass ? planFor(activeClass) : 0;
     const activePlaced = activeClass ? countPlaced(activeClass) : 0;
     const totalPlanned = state.classes.reduce((s, c) => s + planFor(c), 0);
