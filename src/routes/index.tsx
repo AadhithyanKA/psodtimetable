@@ -622,7 +622,9 @@ function Index() {
           if (cell?.kind === "course") {
             const course = cls.courses.find((c) => c.id === cell.courseId);
             if (!course) return;
-            (facultyToClass[course.faculty] ??= []).push(cls.id);
+            getFaculties(course).forEach((f) => {
+              (facultyToClass[f] ??= []).push(cls.id);
+            });
             // Rule violation: course placed on a weekday or period it isn't allowed
             if (!courseAllowedOn(course, date) || !courseAllowedSlotOn(course, i, date)) {
               set.add(`${cls.id}:${key}`);
@@ -630,7 +632,8 @@ function Index() {
           }
         });
         Object.values(facultyToClass).forEach((clsIds) => {
-          if (clsIds.length > 1) clsIds.forEach((id) => set.add(`${id}:${key}`));
+          const unique = Array.from(new Set(clsIds));
+          if (unique.length > 1) unique.forEach((id) => set.add(`${id}:${key}`));
         });
       });
     });
