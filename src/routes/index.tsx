@@ -3059,7 +3059,10 @@ function Index() {
                           style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                         >
                           {(() => {
-                            const t = courseTotalTarget(c, courseSemesterWeeks(c, state));
+                            const t = courseTotalTarget(
+                              c,
+                              courseSemesterWeeks(c, activeClass ? stateForClass(activeClass, state) : state),
+                            );
                             return t > 0
                               ? `${placedForCourse} / ${t} sessions`
                               : `${placedForCourse} placed · no total set`;
