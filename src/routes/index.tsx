@@ -2455,12 +2455,24 @@ function Index() {
             <div className="flex min-w-0 flex-wrap items-end gap-4">
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/50">
-                  From
+                  From · {activeClass?.name ?? ""}
                 </div>
                 <input
                   type="date"
-                  value={state.fromDate}
-                  onChange={(e) => setState((s) => ({ ...s, fromDate: e.target.value }))}
+                  value={activeClass ? classFromDate(activeClass, state) : state.fromDate}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!activeClass) {
+                      setState((s) => ({ ...s, fromDate: v || s.fromDate }));
+                      return;
+                    }
+                    setState((s) => ({
+                      ...s,
+                      classes: s.classes.map((c) =>
+                        c.id === activeClass.id ? { ...c, fromDate: v || undefined } : c,
+                      ),
+                    }));
+                  }}
                   className="border-b border-[#0d0d0d] bg-transparent py-0.5 text-sm font-semibold outline-none"
                   style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                 />
@@ -2468,12 +2480,24 @@ function Index() {
               <span className="pb-1 text-lg text-[#2d2d2d]/30">/</span>
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/50">
-                  To
+                  To · {activeClass?.name ?? ""}
                 </div>
                 <input
                   type="date"
-                  value={state.toDate}
-                  onChange={(e) => setState((s) => ({ ...s, toDate: e.target.value }))}
+                  value={activeClass ? classToDate(activeClass, state) : state.toDate}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!activeClass) {
+                      setState((s) => ({ ...s, toDate: v || s.toDate }));
+                      return;
+                    }
+                    setState((s) => ({
+                      ...s,
+                      classes: s.classes.map((c) =>
+                        c.id === activeClass.id ? { ...c, toDate: v || undefined } : c,
+                      ),
+                    }));
+                  }}
                   className="border-b border-[#0d0d0d] bg-transparent py-0.5 text-sm font-semibold outline-none"
                   style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                 />
