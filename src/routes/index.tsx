@@ -1861,7 +1861,8 @@ function Index() {
       {armedTool?.kind === "course" && cursorPos && activeClass && (() => {
         const course = activeClass.courses.find((c) => c.id === armedTool.courseId);
         if (!course) return null;
-        const total = courseTotalSessions(course, stateForClass(activeClass, state));
+        const clsState = stateForClass(activeClass, state);
+        const total = courseTotalTarget(course, courseSemesterWeeks(course, clsState));
         const placed = coursePlacementCounts.get(course.id) ?? 0;
         const remaining = Math.max(0, total - placed);
         return (
