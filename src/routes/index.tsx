@@ -83,6 +83,10 @@ const classDatesFor = (
   cls: Pick<ClassData, "fromDate" | "toDate">,
   s: { fromDate: string; toDate: string },
 ) => daysBetween(classFromDate(cls, s), classToDate(cls, s));
+const stateForClass = <T extends { fromDate: string; toDate: string }>(
+  cls: Pick<ClassData, "fromDate" | "toDate">,
+  s: T,
+): T => ({ ...s, fromDate: classFromDate(cls, s), toDate: classToDate(cls, s) });
 type Slot = { start: string; end: string; isBreak?: boolean }; // 24h "HH:MM"
 type State = {
   fromDate: string; // YYYY-MM-DD
