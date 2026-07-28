@@ -1225,7 +1225,7 @@ function Index() {
                       }
                     }
                     if (!overlaps) return;
-                    if (other.cls.id === task.cls.id || other.course.faculty === task.course.faculty) {
+                    if (other.cls.id === task.cls.id || sharesFaculty(other.course, task.course)) {
                       blockedOptions++;
                     }
                   });
@@ -1258,7 +1258,10 @@ function Index() {
         for (let i = 0; i < span; i++) {
           const key = `${nextPlacement.date}-${nextPlacement.slot + i}`;
           task.cls.grid[key] = { kind: "course", courseId: task.course.id };
-          (facultyBusy[key] ??= new Set()).add(task.course.faculty);
+          {
+            const bucket = (facultyBusy[key] ??= new Set());
+            getFaculties(task.course).forEach((f) => bucket.add(f));
+          }
         }
         task.perDay[nextPlacement.date] = (task.perDay[nextPlacement.date] ?? 0) + 1;
         task.perSlot[nextPlacement.slot] = (task.perSlot[nextPlacement.slot] ?? 0) + 1;
