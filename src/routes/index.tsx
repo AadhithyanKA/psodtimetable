@@ -1308,9 +1308,11 @@ function Index() {
             if (isStart && !courseSpanFitsRules(course, s.slots, date, slotIdx)) {
               auditIssues.push(`${cls.name} ${course.name} violates rules at ${date} ${periodLabelFor(slotIdx)}`);
             }
-            const list = facultyAtSlot.get(course.faculty) ?? [];
-            list.push(`${cls.name} · ${course.name}`);
-            facultyAtSlot.set(course.faculty, list);
+            getFaculties(course).forEach((f) => {
+              const list = facultyAtSlot.get(f) ?? [];
+              list.push(`${cls.name} · ${course.name}`);
+              facultyAtSlot.set(f, list);
+            });
           });
           facultyAtSlot.forEach((list, faculty) => {
             if (list.length > 1) {
