@@ -2066,8 +2066,11 @@ function Index() {
                     {/* Placed progress row */}
                     <div className="px-3 pb-2">
                       {(() => {
-                        const placed = coursePlacementCounts.get(c.id) ?? 0;
-                         const target = courseTotalTarget(c, courseSemesterWeeks(c, state));
+                         const placed = coursePlacementCounts.get(c.id) ?? 0;
+                         const target = courseTotalTarget(
+                           c,
+                           courseSemesterWeeks(c, activeClass ? stateForClass(activeClass, state) : state),
+                         );
                         const pct =
                           target > 0 ? Math.min(100, Math.round((placed / target) * 100)) : 0;
                         const done = target > 0 && placed >= target;
