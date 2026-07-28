@@ -65,7 +65,28 @@ type Course = {
   // When true, the course is skipped by Fill by Rules / auto-populate.
   disabled?: boolean;
 };
-type ClassData = { id: string; name: string; grid: Record<string, Cell>; courses: Course[] };
+type ClassData = {
+  id: string;
+  name: string;
+  grid: Record<string, Cell>;
+  courses: Course[];
+  // Optional per-class date range overrides. Undefined = fall back to state.fromDate/state.toDate.
+  fromDate?: string;
+  toDate?: string;
+};
+
+const classFromDate = (cls: Pick<ClassData, "fromDate">, s: { fromDate: string }) =>
+  cls.fromDate && isValidIso(cls.fromDate) ? cls.fromDate : s.fromDate;
+const classToDate = (cls: Pick<ClassData, "toDate">, s: { toDate: string }) =>
+  cls.toDate && isValidIso(cls.toDate) ? cls.toDate : s.toDate;
+const classDatesFor = (
+  cls: Pick<ClassData, "fromDate" | "toDate">,
+  s: { fromDate: string; toDate: string },
+) => daysBetween(classFromDate(cls, s), classToDate(cls, s));
+const stateForClass = <T extends { fromDate: string; toDate: string }>(
+  cls: Pick<ClassData, "fromDate" | "toDate">,
+  s: T,
+): T => ({ ...s, fromDate: classFromDate(cls, s), toDate: classToDate(cls, s) });
 type Slot = { start: string; end: string; isBreak?: boolean }; // 24h "HH:MM"
 type State = {
   fromDate: string; // YYYY-MM-DD
@@ -364,6 +385,8 @@ const normalizeStateSnapshot = (snapshot: SavedState): State => {
       name: cls.name || `Class ${String.fromCharCode(65 + index)}`,
       grid: cls.grid ?? {},
       courses: savedCourses,
+      fromDate: isValidIso(cls.fromDate) ? cls.fromDate : undefined,
+      toDate: isValidIso(cls.toDate) ? cls.toDate : undefined,
     };
   });
   return {
@@ -539,8 +562,20 @@ function Index() {
     return () => window.removeEventListener("mouseup", up);
   }, []);
 
-  const dates = useMemo(() => daysBetween(state.fromDate, state.toDate), [state.fromDate, state.toDate]);
   const activeClass = state.classes.find((c) => c.id === activeClassId) ?? state.classes[0];
+  const dates = useMemo(
+    () =>
+      activeClass
+        ? daysBetween(classFromDate(activeClass, state), classToDate(activeClass, state))
+        : daysBetween(state.fromDate, state.toDate),
+    [
+      activeClass?.id,
+      activeClass?.fromDate,
+      activeClass?.toDate,
+      state.fromDate,
+      state.toDate,
+    ],
+  );
 
   useEffect(() => {
     if (!pendingScrollClassId || pendingScrollClassId !== activeClass?.id) return;
@@ -653,14 +688,12 @@ function Index() {
     setState((s) => {
       const wdSet = new Set(weekdays);
       const sSet = new Set(slotIdxs);
-      const targetDates = daysBetween(s.fromDate, s.toDate).filter((iso) =>
-        wdSet.has(weekdayOf(iso)),
-      );
       return {
         ...s,
         classes: s.classes.map((cls) => {
           if (!allClasses && cls.id !== activeClassId) return cls;
           const grid = { ...cls.grid };
+          const targetDates = classDatesFor(cls, s).filter((iso) => wdSet.has(weekdayOf(iso)));
           targetDates.forEach((date) => {
             s.slots.forEach((_, i) => {
               if (!sSet.has(i)) return;
@@ -741,7 +774,14 @@ function Index() {
         ...s,
         classes: [
           ...s.classes,
-          { id, name: `Class ${String.fromCharCode(65 + s.classes.length)}`, grid: {}, courses: [] },
+          {
+            id,
+            name: `Class ${String.fromCharCode(65 + s.classes.length)}`,
+            grid: {},
+            courses: [],
+            fromDate: s.fromDate,
+            toDate: s.toDate,
+          },
         ],
       };
     });
@@ -824,6 +864,9 @@ function Index() {
         grid: { ...cls.grid },
       }));
       const workingDates = daysBetween(s.fromDate, s.toDate);
+      const workingDatesByClass = new Map<string, string[]>(
+        classes.map((cls) => [cls.id, classDatesFor(cls, s)]),
+      );
 
       let totalTarget = 0;
       let placedCount = 0;
@@ -1047,23 +1090,24 @@ function Index() {
         }
       };
 
-      const weeks = new Map<string, string[]>();
-      workingDates.forEach((d) => {
-        const key = weekKey(d);
-        const week = weeks.get(key);
-        if (week) week.push(d);
-        else weeks.set(key, [d]);
-      });
-
       mutableClasses.forEach((cls) => {
+        const clsDates = workingDatesByClass.get(cls.id) ?? workingDates;
+        const clsState = stateForClass(cls, s);
+        const clsWeeks = new Map<string, string[]>();
+        clsDates.forEach((d) => {
+          const key = weekKey(d);
+          const week = clsWeeks.get(key);
+          if (week) week.push(d);
+          else clsWeeks.set(key, [d]);
+        });
         cls.courses.forEach((course) => {
           if (course.disabled) return;
-          const totalTarget = courseTotalTarget(course, courseSemesterWeeks(course, s));
+          const totalTarget = courseTotalTarget(course, courseSemesterWeeks(course, clsState));
           if (totalTarget > 0) {
-            addTask(cls, course, workingDates, totalTarget, "total");
+            addTask(cls, course, clsDates, totalTarget, "total");
             return;
           }
-          weeks.forEach((weekDates, key) => {
+          clsWeeks.forEach((weekDates, key) => {
             const desired = courseWeeklyTarget(course);
             addTask(cls, course, weekDates, desired, key);
           });
@@ -1401,7 +1445,9 @@ function Index() {
     let applied = 0, skipped = 0, outOfRange = 0, noPeriods = 0;
     const errors: string[] = [];
     setState((s) => {
-      const inRange = new Set(daysBetween(s.fromDate, s.toDate));
+      const inRange = new Set<string>();
+      s.classes.forEach((cls) => classDatesFor(cls, s).forEach((d) => inRange.add(d)));
+      daysBetween(s.fromDate, s.toDate).forEach((d) => inRange.add(d));
       const classes: ClassData[] = s.classes.map((cls) => ({ ...cls, grid: { ...cls.grid } }));
       rawLines.slice(1).forEach((line, i) => {
         const cells = parseCsvRow(line);
@@ -1417,6 +1463,8 @@ function Index() {
           : classes.filter((c) => c.name.toLowerCase() === scope);
         if (targets.length === 0) { errors.push(`Row ${i + 2}: unknown scope "${cells[scopeIdx]}"`); skipped++; return; }
         targets.forEach((cls) => {
+          const clsRange = new Set(classDatesFor(cls, s));
+          if (!clsRange.has(date)) return;
           periods.forEach((slotIdx) => {
             cls.grid[`${date}-${slotIdx}`] = { kind: "blocked", label };
             applied++;
@@ -1440,7 +1488,8 @@ function Index() {
   const buildSheet = (cls: ClassData) => {
     const rows: string[][] = [];
     rows.push(["Day / Date", ...state.slots.map(slotLabel)]);
-    dates.forEach((date) => {
+    const clsDates = classDatesFor(cls, state);
+    clsDates.forEach((date) => {
       const { weekday, date: dstr } = dayLabel(date);
       const row = [`${weekday} ${dstr}`];
       state.slots.forEach((sl, i) => {
@@ -1480,6 +1529,7 @@ function Index() {
     const baseBorders = { top: border, bottom: border, left: border, right: border };
     state.classes.forEach((cls) => {
       const data = buildSheet(cls);
+      const clsDates = classDatesFor(cls, state);
       const ws = XLSXStyle.utils.aoa_to_sheet(data);
       const numCols = data[0].length;
       ws["!cols"] = Array.from({ length: numCols }, (_, i) => ({ wch: i === 0 ? 18 : 20 }));
@@ -1497,7 +1547,7 @@ function Index() {
             cellStyle.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } };
             cellStyle.fill = { patternType: "solid", fgColor: { rgb: "0D0D0D" } };
           } else {
-            const date = dates[r - 1];
+            const date = clsDates[r - 1];
             const slotIdx = c - 1;
             const key = `${date}-${slotIdx}`;
             const isConflict = conflicts.has(`${cls.id}:${key}`);
@@ -1562,6 +1612,8 @@ function Index() {
     const wb = XLSX.utils.book_new();
     state.classes.forEach((cls) => {
       const rows: (string | number)[][] = [header];
+      const clsDates = classDatesFor(cls, state);
+      const clsState = stateForClass(cls, state);
       cls.courses.forEach((course) => {
         const teacher = course.faculty || "";
         const className = cls.name;
@@ -1569,16 +1621,16 @@ function Index() {
         const subjectName = course.name;
         const classroom = course.classroom || "";
         const placedPeriodsByWeek = new Map<number, number>();
-        dates.forEach((date) => {
+        clsDates.forEach((date) => {
           state.slots.forEach((slot, slotIdx) => {
             if (slot.isBreak) return;
             const cell = cls.grid[`${date}-${slotIdx}`];
             if (cell?.kind !== "course" || cell.courseId !== course.id) return;
             const cycle =
-              courseCycleForDate(course, state, date) ??
+              courseCycleForDate(course, clsState, date) ??
               (() => {
                 // Fallback: week index relative to global timetable start
-                const start = utcDateFromIso(state.fromDate);
+                const start = utcDateFromIso(classFromDate(cls, state));
                 const cur = utcDateFromIso(date);
                 if (!start || !cur) return 1;
                 return Math.floor((cur.getTime() - start.getTime()) / (7 * 86400000)) + 1;
@@ -1729,23 +1781,27 @@ function Index() {
       const wk = 1 + Math.round(((t.getTime() - first.getTime()) / 86400000 - 3 + ((first.getUTCDay() + 6) % 7)) / 7);
       return `${t.getUTCFullYear()}-W${wk}`;
     };
-    const weekCount = new Set(dates.map(isoWeekKey)).size;
     const countPlaced = (cls: ClassData) => {
+      const clsDates = classDatesFor(cls, state);
       let n = 0;
       cls.courses.forEach((course) => {
-        n += countCourseSessionsInDates(cls.grid, course, state.slots, dates);
+        n += countCourseSessionsInDates(cls.grid, course, state.slots, clsDates);
       });
       return n;
     };
-    const planFor = (cls: ClassData) =>
-      cls.courses.reduce((sum, c) => {
+    const planFor = (cls: ClassData) => {
+      const clsState = stateForClass(cls, state);
+      const clsDates = classDatesFor(cls, state);
+      const weekCount = new Set(clsDates.map(isoWeekKey)).size;
+      return cls.courses.reduce((sum, c) => {
         if (c.disabled) return sum;
-        const totalT = courseTotalTarget(c, courseSemesterWeeks(c, state));
+        const totalT = courseTotalTarget(c, courseSemesterWeeks(c, clsState));
         const requested = totalT > 0 ? totalT : courseWeeklyTarget(c) * weekCount;
-        const capacity = countCourseRuleCapacity(c, state.slots, dates);
+        const capacity = countCourseRuleCapacity(c, state.slots, clsDates);
         if (requested <= 0) return sum + capacity;
         return sum + requested;
       }, 0);
+    };
     const activePlanned = activeClass ? planFor(activeClass) : 0;
     const activePlaced = activeClass ? countPlaced(activeClass) : 0;
     const totalPlanned = state.classes.reduce((s, c) => s + planFor(c), 0);
@@ -2014,8 +2070,11 @@ function Index() {
                     {/* Placed progress row */}
                     <div className="px-3 pb-2">
                       {(() => {
-                        const placed = coursePlacementCounts.get(c.id) ?? 0;
-                         const target = courseTotalTarget(c, courseSemesterWeeks(c, state));
+                         const placed = coursePlacementCounts.get(c.id) ?? 0;
+                         const target = courseTotalTarget(
+                           c,
+                           courseSemesterWeeks(c, activeClass ? stateForClass(activeClass, state) : state),
+                         );
                         const pct =
                           target > 0 ? Math.min(100, Math.round((placed / target) * 100)) : 0;
                         const done = target > 0 && placed >= target;
@@ -2417,12 +2476,24 @@ function Index() {
             <div className="flex min-w-0 flex-wrap items-end gap-4">
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/50">
-                  From
+                  From · {activeClass?.name ?? ""}
                 </div>
                 <input
                   type="date"
-                  value={state.fromDate}
-                  onChange={(e) => setState((s) => ({ ...s, fromDate: e.target.value }))}
+                  value={activeClass ? classFromDate(activeClass, state) : state.fromDate}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!activeClass) {
+                      setState((s) => ({ ...s, fromDate: v || s.fromDate }));
+                      return;
+                    }
+                    setState((s) => ({
+                      ...s,
+                      classes: s.classes.map((c) =>
+                        c.id === activeClass.id ? { ...c, fromDate: v || undefined } : c,
+                      ),
+                    }));
+                  }}
                   className="border-b border-[#0d0d0d] bg-transparent py-0.5 text-sm font-semibold outline-none"
                   style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                 />
@@ -2430,12 +2501,24 @@ function Index() {
               <span className="pb-1 text-lg text-[#2d2d2d]/30">/</span>
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/50">
-                  To
+                  To · {activeClass?.name ?? ""}
                 </div>
                 <input
                   type="date"
-                  value={state.toDate}
-                  onChange={(e) => setState((s) => ({ ...s, toDate: e.target.value }))}
+                  value={activeClass ? classToDate(activeClass, state) : state.toDate}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!activeClass) {
+                      setState((s) => ({ ...s, toDate: v || s.toDate }));
+                      return;
+                    }
+                    setState((s) => ({
+                      ...s,
+                      classes: s.classes.map((c) =>
+                        c.id === activeClass.id ? { ...c, toDate: v || undefined } : c,
+                      ),
+                    }));
+                  }}
                   className="border-b border-[#0d0d0d] bg-transparent py-0.5 text-sm font-semibold outline-none"
                   style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                 />
@@ -2980,7 +3063,10 @@ function Index() {
                           style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                         >
                           {(() => {
-                            const t = courseTotalTarget(c, courseSemesterWeeks(c, state));
+                            const t = courseTotalTarget(
+                              c,
+                              courseSemesterWeeks(c, activeClass ? stateForClass(activeClass, state) : state),
+                            );
                             return t > 0
                               ? `${placedForCourse} / ${t} sessions`
                               : `${placedForCourse} placed · no total set`;
