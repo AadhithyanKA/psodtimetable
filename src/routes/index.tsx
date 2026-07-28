@@ -665,7 +665,7 @@ function Index() {
           const cell = cls.grid[key];
           if (cell?.kind !== "course") return false;
           const otherCourse = cls.courses.find((c) => c.id === cell.courseId);
-          return otherCourse?.faculty === course.faculty;
+          return otherCourse ? sharesFaculty(otherCourse, course) : false;
         });
         if (facultyBusy && !overrideMode) {
           setAutoFillReport("Cannot place course — this faculty is already assigned in another class at that time.");
