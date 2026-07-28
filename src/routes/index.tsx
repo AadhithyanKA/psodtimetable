@@ -979,9 +979,11 @@ function Index() {
               if (cell?.kind !== "course") return;
               const course = cls.courses.find((c) => c.id === cell.courseId);
               if (!course) return;
-              const list = byFaculty.get(course.faculty) ?? [];
-              list.push(cls);
-              byFaculty.set(course.faculty, list);
+              getFaculties(course).forEach((f) => {
+                const list = byFaculty.get(f) ?? [];
+                if (!list.includes(cls)) list.push(cls);
+                byFaculty.set(f, list);
+              });
             });
             byFaculty.forEach((busyClasses) => {
               if (busyClasses.length < 2) return;
@@ -1006,7 +1008,10 @@ function Index() {
         Object.entries(cls.grid).forEach(([key, cell]) => {
           if (cell.kind !== "course") return;
           const course = cls.courses.find((c) => c.id === cell.courseId);
-          if (course) (facultyBusy[key] ??= new Set()).add(course.faculty);
+          if (course) {
+            const bucket = (facultyBusy[key] ??= new Set());
+            getFaculties(course).forEach((f) => bucket.add(f));
+          }
         });
       });
       const globalDateOrder = new Map(workingDates.map((date, index) => [date, index]));
