@@ -1484,7 +1484,8 @@ function Index() {
   const buildSheet = (cls: ClassData) => {
     const rows: string[][] = [];
     rows.push(["Day / Date", ...state.slots.map(slotLabel)]);
-    dates.forEach((date) => {
+    const clsDates = classDatesFor(cls, state);
+    clsDates.forEach((date) => {
       const { weekday, date: dstr } = dayLabel(date);
       const row = [`${weekday} ${dstr}`];
       state.slots.forEach((sl, i) => {
