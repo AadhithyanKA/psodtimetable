@@ -1525,6 +1525,7 @@ function Index() {
     const baseBorders = { top: border, bottom: border, left: border, right: border };
     state.classes.forEach((cls) => {
       const data = buildSheet(cls);
+      const clsDates = classDatesFor(cls, state);
       const ws = XLSXStyle.utils.aoa_to_sheet(data);
       const numCols = data[0].length;
       ws["!cols"] = Array.from({ length: numCols }, (_, i) => ({ wch: i === 0 ? 18 : 20 }));
@@ -1542,7 +1543,7 @@ function Index() {
             cellStyle.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } };
             cellStyle.fill = { patternType: "solid", fgColor: { rgb: "0D0D0D" } };
           } else {
-            const date = dates[r - 1];
+            const date = clsDates[r - 1];
             const slotIdx = c - 1;
             const key = `${date}-${slotIdx}`;
             const isConflict = conflicts.has(`${cls.id}:${key}`);
