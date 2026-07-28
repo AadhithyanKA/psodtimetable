@@ -1608,6 +1608,8 @@ function Index() {
     const wb = XLSX.utils.book_new();
     state.classes.forEach((cls) => {
       const rows: (string | number)[][] = [header];
+      const clsDates = classDatesFor(cls, state);
+      const clsState = stateForClass(cls, state);
       cls.courses.forEach((course) => {
         const teacher = course.faculty || "";
         const className = cls.name;
@@ -1615,16 +1617,16 @@ function Index() {
         const subjectName = course.name;
         const classroom = course.classroom || "";
         const placedPeriodsByWeek = new Map<number, number>();
-        dates.forEach((date) => {
+        clsDates.forEach((date) => {
           state.slots.forEach((slot, slotIdx) => {
             if (slot.isBreak) return;
             const cell = cls.grid[`${date}-${slotIdx}`];
             if (cell?.kind !== "course" || cell.courseId !== course.id) return;
             const cycle =
-              courseCycleForDate(course, state, date) ??
+              courseCycleForDate(course, clsState, date) ??
               (() => {
                 // Fallback: week index relative to global timetable start
-                const start = utcDateFromIso(state.fromDate);
+                const start = utcDateFromIso(classFromDate(cls, state));
                 const cur = utcDateFromIso(date);
                 if (!start || !cur) return 1;
                 return Math.floor((cur.getTime() - start.getTime()) / (7 * 86400000)) + 1;
