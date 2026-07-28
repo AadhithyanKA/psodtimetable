@@ -1049,7 +1049,7 @@ function Index() {
           const key = `${date}-${idx}`;
           const existing = cls.grid[key];
           if (existing && existing.kind !== "empty") return false;
-          if (facultyBusy[key]?.has(course.faculty)) return false;
+          if (facultyBusy[key] && getFaculties(course).some((f) => facultyBusy[key].has(f))) return false;
         }
         return true;
       };
@@ -1069,14 +1069,14 @@ function Index() {
               ? "selected rule slots already filled"
               : "class already has another course there";
           }
-          if (facultyBusy[key]?.has(course.faculty)) {
+          if (facultyBusy[key] && getFaculties(course).some((f) => facultyBusy[key].has(f))) {
             const busy = classes
               .filter((other) => other.id !== cls.id)
               .map((other) => {
                 const busyCell = other.grid[key];
                 if (busyCell?.kind !== "course") return null;
                 const busyCourse = other.courses.find((c) => c.id === busyCell.courseId);
-                if (busyCourse?.faculty !== course.faculty) return null;
+                if (!busyCourse || !sharesFaculty(busyCourse, course)) return null;
                 return `${other.name}${busyCourse.name ? ` (${busyCourse.name})` : ""}`;
               })
               .filter((value): value is string => Boolean(value));
