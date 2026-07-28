@@ -2053,7 +2053,8 @@ function Index() {
                       <input
                         value={c.faculty}
                         onChange={(e) => updateCourse(c.id, { faculty: e.target.value })}
-                        placeholder="Faculty"
+                        placeholder="Faculty (comma-sep for multiple)"
+                        title="One or more faculty names. Separate co-teachers with commas (e.g. Dr. Smith, Dr. Jones). Any shared name across classes counts as a conflict."
                         className="min-w-0 border-b border-dashed border-[#0d0d0d]/20 bg-transparent text-xs text-[#2d2d2d]/70 outline-none focus:border-[#0d0d0d]"
                       />
                       <input
