@@ -558,8 +558,20 @@ function Index() {
     return () => window.removeEventListener("mouseup", up);
   }, []);
 
-  const dates = useMemo(() => daysBetween(state.fromDate, state.toDate), [state.fromDate, state.toDate]);
   const activeClass = state.classes.find((c) => c.id === activeClassId) ?? state.classes[0];
+  const dates = useMemo(
+    () =>
+      activeClass
+        ? daysBetween(classFromDate(activeClass, state), classToDate(activeClass, state))
+        : daysBetween(state.fromDate, state.toDate),
+    [
+      activeClass?.id,
+      activeClass?.fromDate,
+      activeClass?.toDate,
+      state.fromDate,
+      state.toDate,
+    ],
+  );
 
   useEffect(() => {
     if (!pendingScrollClassId || pendingScrollClassId !== activeClass?.id) return;
