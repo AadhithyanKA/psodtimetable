@@ -1463,6 +1463,8 @@ function Index() {
           : classes.filter((c) => c.name.toLowerCase() === scope);
         if (targets.length === 0) { errors.push(`Row ${i + 2}: unknown scope "${cells[scopeIdx]}"`); skipped++; return; }
         targets.forEach((cls) => {
+          const clsRange = new Set(classDatesFor(cls, s));
+          if (!clsRange.has(date)) return;
           periods.forEach((slotIdx) => {
             cls.grid[`${date}-${slotIdx}`] = { kind: "blocked", label };
             applied++;
