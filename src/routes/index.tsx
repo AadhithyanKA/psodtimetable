@@ -1445,7 +1445,9 @@ function Index() {
     let applied = 0, skipped = 0, outOfRange = 0, noPeriods = 0;
     const errors: string[] = [];
     setState((s) => {
-      const inRange = new Set(daysBetween(s.fromDate, s.toDate));
+      const inRange = new Set<string>();
+      s.classes.forEach((cls) => classDatesFor(cls, s).forEach((d) => inRange.add(d)));
+      daysBetween(s.fromDate, s.toDate).forEach((d) => inRange.add(d));
       const classes: ClassData[] = s.classes.map((cls) => ({ ...cls, grid: { ...cls.grid } }));
       rawLines.slice(1).forEach((line, i) => {
         const cells = parseCsvRow(line);
