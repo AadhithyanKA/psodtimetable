@@ -381,6 +381,8 @@ const normalizeStateSnapshot = (snapshot: SavedState): State => {
       name: cls.name || `Class ${String.fromCharCode(65 + index)}`,
       grid: cls.grid ?? {},
       courses: savedCourses,
+      fromDate: isValidIso(cls.fromDate) ? cls.fromDate : undefined,
+      toDate: isValidIso(cls.toDate) ? cls.toDate : undefined,
     };
   });
   return {
