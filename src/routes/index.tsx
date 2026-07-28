@@ -145,6 +145,27 @@ const weekdayOf = (iso: string): number =>
   utcDateFromIso(iso)?.getUTCDay() ?? 0;
 const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
 const WEEKDAY_FULL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// Faculty helpers. A course's `faculty` field may hold one name or several
+// names separated by commas / semicolons / slashes to model co-taught
+// sessions. All conflict checks compare the SET of faculty names — two
+// courses conflict if they share ANY teacher.
+const getFaculties = (course: Pick<Course, "faculty">): string[] => {
+  const raw = (course.faculty || "").trim();
+  if (!raw) return [];
+  return raw
+    .split(/[,;/]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+};
+const facultyKey = (course: Pick<Course, "faculty">): string =>
+  getFaculties(course).slice().sort().join("|");
+const sharesFaculty = (
+  a: Pick<Course, "faculty">,
+  b: Pick<Course, "faculty">,
+): boolean => {
+  const set = new Set(getFaculties(a));
+  return getFaculties(b).some((f) => set.has(f));
+};
 const courseAllowedDate = (course: Course, iso: string): boolean => {
   if (course.fromDate && iso < course.fromDate) return false;
   if (course.toDate && iso > course.toDate) return false;
