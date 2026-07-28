@@ -860,6 +860,9 @@ function Index() {
         grid: { ...cls.grid },
       }));
       const workingDates = daysBetween(s.fromDate, s.toDate);
+      const workingDatesByClass = new Map<string, string[]>(
+        classes.map((cls) => [cls.id, classDatesFor(cls, s)]),
+      );
 
       let totalTarget = 0;
       let placedCount = 0;
@@ -1083,23 +1086,23 @@ function Index() {
         }
       };
 
-      const weeks = new Map<string, string[]>();
-      workingDates.forEach((d) => {
-        const key = weekKey(d);
-        const week = weeks.get(key);
-        if (week) week.push(d);
-        else weeks.set(key, [d]);
-      });
-
       mutableClasses.forEach((cls) => {
+        const clsDates = workingDatesByClass.get(cls.id) ?? workingDates;
+        const clsWeeks = new Map<string, string[]>();
+        clsDates.forEach((d) => {
+          const key = weekKey(d);
+          const week = clsWeeks.get(key);
+          if (week) week.push(d);
+          else clsWeeks.set(key, [d]);
+        });
         cls.courses.forEach((course) => {
           if (course.disabled) return;
           const totalTarget = courseTotalTarget(course, courseSemesterWeeks(course, s));
           if (totalTarget > 0) {
-            addTask(cls, course, workingDates, totalTarget, "total");
+            addTask(cls, course, clsDates, totalTarget, "total");
             return;
           }
-          weeks.forEach((weekDates, key) => {
+          clsWeeks.forEach((weekDates, key) => {
             const desired = courseWeeklyTarget(course);
             addTask(cls, course, weekDates, desired, key);
           });
