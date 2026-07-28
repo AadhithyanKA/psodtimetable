@@ -1854,7 +1854,34 @@ function Index() {
       className="min-h-screen w-full bg-[#f5f3ee] text-[#2d2d2d]"
       style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}
       onMouseLeave={() => setIsPainting(false)}
+      onMouseMove={(e) => {
+        if (armedTool?.kind === "course") setCursorPos({ x: e.clientX, y: e.clientY });
+      }}
     >
+      {armedTool?.kind === "course" && cursorPos && activeClass && (() => {
+        const course = activeClass.courses.find((c) => c.id === armedTool.courseId);
+        if (!course) return null;
+        const total = courseTotalSessions(course, stateForClass(activeClass, state));
+        const placed = coursePlacementCounts.get(course.id) ?? 0;
+        const remaining = Math.max(0, total - placed);
+        return (
+          <div
+            className="pointer-events-none fixed z-[9999] flex items-center gap-2 border-2 border-[#0d0d0d] bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-wider shadow-lg"
+            style={{ left: cursorPos.x + 16, top: cursorPos.y + 16 }}
+          >
+            <span
+              className="inline-block h-2.5 w-2.5 border border-[#0d0d0d]"
+              style={{ backgroundColor: course.color }}
+            />
+            <span>{course.name}</span>
+            <span className="text-[#0d0d0d]/60">·</span>
+            <span className={remaining === 0 ? "text-emerald-700" : "text-red-700"}>
+              {remaining} left
+            </span>
+            <span className="text-[#0d0d0d]/60">/ {total}</span>
+          </div>
+        );
+      })()}
       <div className="mx-auto flex min-h-screen w-full max-w-[1500px] flex-col md:flex-row md:border-x-2 md:border-[#0d0d0d]">
         {/* Sidebar */}
         <aside className="w-full shrink-0 border-b-2 border-[#0d0d0d] bg-[#e8e4dd] md:w-[320px] md:border-b-0 md:border-r-2">
