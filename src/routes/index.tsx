@@ -493,6 +493,7 @@ function Index() {
   const [pendingScrollClassId, setPendingScrollClassId] = useState<string | null>(null);
   const [pendingBlockCsv, setPendingBlockCsv] = useState<{ name: string; text: string } | null>(null);
   const [blockReport, setBlockReport] = useState<string>("");
+  const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -727,6 +728,27 @@ function Index() {
       }),
     }));
     setAutoFillReport("Timetable cleared — course assignments removed.");
+  };
+
+  const clearCurrentClass = () => {
+    if (state.frozen) {
+      setAutoFillReport("Timetable is frozen — unfreeze to clear.");
+      return;
+    }
+    if (!activeClass) return;
+    if (!confirm(`Clear all course assignments from "${activeClass.name}"? Breaks and blocked slots will stay.`)) return;
+    setState((s) => ({
+      ...s,
+      classes: s.classes.map((cls) => {
+        if (cls.id !== activeClassId) return cls;
+        const grid: Record<string, Cell> = {};
+        Object.entries(cls.grid).forEach(([key, cell]) => {
+          if (cell.kind !== "course") grid[key] = cell;
+        });
+        return { ...cls, grid };
+      }),
+    }));
+    setAutoFillReport(`Cleared "${activeClass.name}" — course assignments removed.`);
   };
 
   const onCellMouseDown = (date: string, slotIdx: number, e: React.MouseEvent) => {
@@ -1832,7 +1854,35 @@ function Index() {
       className="min-h-screen w-full bg-[#f5f3ee] text-[#2d2d2d]"
       style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}
       onMouseLeave={() => setIsPainting(false)}
+      onMouseMove={(e) => {
+        if (armedTool?.kind === "course") setCursorPos({ x: e.clientX, y: e.clientY });
+      }}
     >
+      {armedTool?.kind === "course" && cursorPos && activeClass && (() => {
+        const course = activeClass.courses.find((c) => c.id === armedTool.courseId);
+        if (!course) return null;
+        const clsState = stateForClass(activeClass, state);
+        const total = courseTotalTarget(course, courseSemesterWeeks(course, clsState));
+        const placed = coursePlacementCounts.get(course.id) ?? 0;
+        const remaining = Math.max(0, total - placed);
+        return (
+          <div
+            className="pointer-events-none fixed z-[9999] flex items-center gap-2 border-2 border-[#0d0d0d] bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-wider shadow-lg"
+            style={{ left: cursorPos.x + 16, top: cursorPos.y + 16 }}
+          >
+            <span
+              className="inline-block h-2.5 w-2.5 border border-[#0d0d0d]"
+              style={{ backgroundColor: course.color }}
+            />
+            <span>{course.name}</span>
+            <span className="text-[#0d0d0d]/60">·</span>
+            <span className={remaining === 0 ? "text-emerald-700" : "text-red-700"}>
+              {remaining} left
+            </span>
+            <span className="text-[#0d0d0d]/60">/ {total}</span>
+          </div>
+        );
+      })()}
       <div className="mx-auto flex min-h-screen w-full max-w-[1500px] flex-col md:flex-row md:border-x-2 md:border-[#0d0d0d]">
         {/* Sidebar */}
         <aside className="w-full shrink-0 border-b-2 border-[#0d0d0d] bg-[#e8e4dd] md:w-[320px] md:border-b-0 md:border-r-2">
@@ -2542,6 +2592,13 @@ function Index() {
                 title="Clear all course assignments"
               >
                 Clear
+              </button>
+              <button
+                onClick={clearCurrentClass}
+                className="border-2 border-red-700 bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-red-700 transition-transform hover:bg-red-50 active:translate-y-0.5"
+                title="Clear course assignments in the current class only"
+              >
+                Clear Current
               </button>
               <button
                 onClick={() => fileInputRef.current?.click()}
