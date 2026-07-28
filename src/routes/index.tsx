@@ -729,6 +729,27 @@ function Index() {
     setAutoFillReport("Timetable cleared — course assignments removed.");
   };
 
+  const clearCurrentClass = () => {
+    if (state.frozen) {
+      setAutoFillReport("Timetable is frozen — unfreeze to clear.");
+      return;
+    }
+    if (!activeClass) return;
+    if (!confirm(`Clear all course assignments from "${activeClass.name}"? Breaks and blocked slots will stay.`)) return;
+    setState((s) => ({
+      ...s,
+      classes: s.classes.map((cls) => {
+        if (cls.id !== s.activeClassId) return cls;
+        const grid: Record<string, Cell> = {};
+        Object.entries(cls.grid).forEach(([key, cell]) => {
+          if (cell.kind !== "course") grid[key] = cell;
+        });
+        return { ...cls, grid };
+      }),
+    }));
+    setAutoFillReport(`Cleared "${activeClass.name}" — course assignments removed.`);
+  };
+
   const onCellMouseDown = (date: string, slotIdx: number, e: React.MouseEvent) => {
     if (state.slots[slotIdx]?.isBreak) { e.preventDefault(); return; }
     // Alt + right-click erases immediately
