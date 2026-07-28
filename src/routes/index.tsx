@@ -65,7 +65,24 @@ type Course = {
   // When true, the course is skipped by Fill by Rules / auto-populate.
   disabled?: boolean;
 };
-type ClassData = { id: string; name: string; grid: Record<string, Cell>; courses: Course[] };
+type ClassData = {
+  id: string;
+  name: string;
+  grid: Record<string, Cell>;
+  courses: Course[];
+  // Optional per-class date range overrides. Undefined = fall back to state.fromDate/state.toDate.
+  fromDate?: string;
+  toDate?: string;
+};
+
+const classFromDate = (cls: Pick<ClassData, "fromDate">, s: { fromDate: string }) =>
+  cls.fromDate && isValidIso(cls.fromDate) ? cls.fromDate : s.fromDate;
+const classToDate = (cls: Pick<ClassData, "toDate">, s: { toDate: string }) =>
+  cls.toDate && isValidIso(cls.toDate) ? cls.toDate : s.toDate;
+const classDatesFor = (
+  cls: Pick<ClassData, "fromDate" | "toDate">,
+  s: { fromDate: string; toDate: string },
+) => daysBetween(classFromDate(cls, s), classToDate(cls, s));
 type Slot = { start: string; end: string; isBreak?: boolean }; // 24h "HH:MM"
 type State = {
   fromDate: string; // YYYY-MM-DD
