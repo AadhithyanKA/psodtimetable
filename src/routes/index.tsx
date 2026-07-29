@@ -29,7 +29,7 @@ type Cell =
   | { kind: "empty" }
   | { kind: "break"; label: string }
   | { kind: "blocked"; label: string }
-  | { kind: "course"; courseId: string };
+  | { kind: "course"; courseId: string; locked?: boolean };
 
 type Course = {
   id: string;
@@ -517,6 +517,11 @@ function Index() {
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const adminInputRef = useRef<HTMLInputElement>(null);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [adminRefs, setAdminRefs] = useState<
+    Array<{ id: string; name: string; state: State }>
+  >([]);
 
   // Map slot index → 1-based period number, skipping breaks.
   const periodNumberFor = (slotIdx: number): number =>
@@ -926,7 +931,7 @@ function Index() {
         mutableClasses.forEach((cls) => {
           Object.keys(cls.grid).forEach((k) => {
             const cell = cls.grid[k];
-            if (cell && cell.kind === "course") delete cls.grid[k];
+            if (cell && cell.kind === "course" && !cell.locked) delete cls.grid[k];
           });
         });
       }
@@ -939,6 +944,9 @@ function Index() {
             const key = `${date}-${idx}`;
             const cell = cls.grid[key];
             if (cell?.kind !== "course" || cell.courseId !== courseId) break;
+            // Never remove frozen/locked placements — they are permanent
+            // overrides and must survive Fill by Rules.
+            if (cell.locked) { idx++; continue; }
             delete cls.grid[key];
             removed++;
             idx++;
@@ -952,6 +960,7 @@ function Index() {
                 const key = `${date}-${slotIdx}`;
                 const cell = cls.grid[key];
                 if (cell?.kind !== "course") continue;
+                if (cell.locked) continue;
                 const prev = slotIdx > 0 ? cls.grid[`${date}-${slotIdx - 1}`] : undefined;
                 if (prev?.kind === "course" && prev.courseId === cell.courseId) continue;
                 const course = cls.courses.find((c) => c.id === cell.courseId);
@@ -991,6 +1000,7 @@ function Index() {
                 if (!mutableClasses.includes(cls)) return;
                 const cell = cls.grid[key];
                 if (cell?.kind !== "course") return;
+                if (cell.locked) return;
                 delete cls.grid[key];
                 removed++;
               });
@@ -1389,10 +1399,8 @@ function Index() {
     label: string,
     opts: { overwrite: boolean; strictRules?: boolean }
   ) => {
-    if (state.frozen) {
-      setAutoFillReport("Timetable is frozen — unfreeze to run auto-fill.");
-      return;
-    }
+    // When frozen we still allow auto-fill to run: locked cells are preserved
+    // and only empty slots receive new placements.
     setAutoStatus({ label, phase: "Preparing…" });
     // Yield twice so the overlay paints before the synchronous solver runs.
     requestAnimationFrame(() => {
@@ -1798,6 +1806,75 @@ function Index() {
       alert("Could not read this .aadhi file.");
     }
   };
+
+  // ---- Admin cross-check: load additional .aadhi files as reference and
+  // report faculty conflicts between them and the currently open timetable.
+  const loadAdminReference = async (file: File) => {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const loaded: SavedState | undefined = parsed?.state ?? parsed;
+      if (!loaded || !Array.isArray(loaded.classes) || !Array.isArray(loaded.slots)) {
+        alert(`"${file.name}" doesn't look like a valid .aadhi file.`);
+        return;
+      }
+      const normalized = normalizeStateSnapshot(loaded);
+      setAdminRefs((prev) => [
+        ...prev,
+        { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: file.name, state: normalized },
+      ]);
+    } catch {
+      alert(`Could not read "${file.name}".`);
+    }
+  };
+
+  const adminReport = useMemo(() => {
+    // Build (date, slot) → list of { origin, className, courseName, faculty }
+    type Placement = { origin: string; className: string; courseName: string; faculty: string };
+    const rows: Array<{ key: string; date: string; slotIdx: number; conflicts: Placement[] }> = [];
+    if (!adminOpen || adminRefs.length === 0) return rows;
+    const sources: Array<{ origin: string; state: State }> = [
+      { origin: "This file", state },
+      ...adminRefs.map((r) => ({ origin: r.name, state: r.state })),
+    ];
+    // Group placements by key
+    const byKey = new Map<string, Placement[]>();
+    sources.forEach(({ origin, state: st }) => {
+      st.classes.forEach((cls) => {
+        Object.entries(cls.grid).forEach(([key, cell]) => {
+          if (cell.kind !== "course") return;
+          const course = cls.courses.find((c) => c.id === cell.courseId);
+          if (!course) return;
+          getFaculties(course).forEach((faculty) => {
+            const list = byKey.get(key) ?? [];
+            list.push({ origin, className: cls.name, courseName: course.name || course.id, faculty });
+            byKey.set(key, list);
+          });
+        });
+      });
+    });
+    byKey.forEach((list, key) => {
+      const byFaculty = new Map<string, Placement[]>();
+      list.forEach((p) => {
+        const b = byFaculty.get(p.faculty) ?? [];
+        b.push(p);
+        byFaculty.set(p.faculty, b);
+      });
+      const clashes: Placement[] = [];
+      byFaculty.forEach((ps) => {
+        // Only count as a clash if the same faculty appears in more than one
+        // (origin,className) pair at this slot.
+        const distinct = new Set(ps.map((p) => `${p.origin}⧫${p.className}`));
+        if (distinct.size > 1) clashes.push(...ps);
+      });
+      if (clashes.length > 0) {
+        const [d, sIdxStr] = key.split(/-(?=\d+$)/);
+        rows.push({ key, date: d, slotIdx: parseInt(sIdxStr, 10), conflicts: clashes });
+      }
+    });
+    rows.sort((a, b) => (a.date === b.date ? a.slotIdx - b.slotIdx : a.date.localeCompare(b.date)));
+    return rows;
+  }, [adminOpen, adminRefs, state]);
 
   const cellDisplay = (cell: Cell | undefined, courses: Course[]) => {
     if (!cell || cell.kind === "empty") return { text: "", bg: "#fff", fg: "#94a3b8" };
@@ -2650,6 +2727,13 @@ function Index() {
                 Save
               </button>
               <button
+                onClick={() => setAdminOpen(true)}
+                className="border-2 border-indigo-700 bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-indigo-700 transition-transform hover:bg-indigo-50 active:translate-y-0.5"
+                title="Admin mode: load other classes' .aadhi files to cross-check all timetables"
+              >
+                Admin
+              </button>
+              <button
                 onClick={exportCSV}
                 className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
               >
@@ -3041,7 +3125,21 @@ function Index() {
                   if (!state.frozen) {
                     if (!confirm("Freeze the timetable? This locks all cells, hides conflict warnings, and makes overrides permanent. You can unfreeze later.")) return;
                   }
-                  setState((s) => ({ ...s, frozen: !s.frozen }));
+                  setState((s) => {
+                    const nextFrozen = !s.frozen;
+                    if (!nextFrozen) return { ...s, frozen: false };
+                    // Lock every existing course placement so future auto-fills
+                    // (and any subsequent unfreeze + edit) cannot silently
+                    // remove or overwrite the manually reviewed timetable.
+                    const classes = s.classes.map((cls) => {
+                      const grid: Record<string, Cell> = {};
+                      Object.entries(cls.grid).forEach(([k, cell]) => {
+                        grid[k] = cell.kind === "course" ? { ...cell, locked: true } : cell;
+                      });
+                      return { ...cls, grid };
+                    });
+                    return { ...s, frozen: true, classes };
+                  });
                 }}
                 className={
                   "flex items-center gap-2 border-2 px-2 py-1 text-[11px] font-bold uppercase tracking-wider transition " +
@@ -3521,6 +3619,166 @@ function Index() {
             <div className="text-[11px] text-[#2d2d2d]/80">{autoStatus.phase}</div>
           </div>
           <style>{`@keyframes autofill{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}`}</style>
+        </div>
+      )}
+      {adminOpen && (
+        <div
+          className="fixed inset-0 z-[90] bg-[#0d0d0d]/50 p-4 backdrop-blur-sm"
+          onClick={() => setAdminOpen(false)}
+        >
+          <div
+            className="absolute left-1/2 top-1/2 flex max-h-[85vh] w-[min(760px,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col border-2 border-[#0d0d0d] bg-[#f5f3ee] shadow-[8px_8px_0px_0px_#0d0d0d]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b-2 border-[#0d0d0d] bg-indigo-700 px-4 py-3 text-white">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-white/70">Admin Mode</div>
+                <div className="text-sm font-bold" style={{ fontFamily: "'Sora', system-ui, sans-serif" }}>
+                  Cross-check timetables across classes
+                </div>
+              </div>
+              <button
+                onClick={() => setAdminOpen(false)}
+                className="border-2 border-white bg-transparent px-3 py-1 text-[11px] font-bold uppercase tracking-wider hover:bg-white hover:text-indigo-700"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              <input
+                ref={adminInputRef}
+                type="file"
+                accept=".aadhi,application/json"
+                multiple
+                className="hidden"
+                onChange={async (e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  for (const f of files) await loadAdminReference(f);
+                  e.target.value = "";
+                }}
+              />
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => adminInputRef.current?.click()}
+                  className="border-2 border-[#0d0d0d] bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
+                >
+                  Load reference .aadhi
+                </button>
+                {adminRefs.length > 0 && (
+                  <button
+                    onClick={() => setAdminRefs([])}
+                    className="border-2 border-red-700 bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-red-700 hover:bg-red-50"
+                  >
+                    Clear all
+                  </button>
+                )}
+                <span className="text-[11px] text-[#2d2d2d]/70">
+                  Loaded references are held in memory only — nothing is written back.
+                </span>
+              </div>
+              <div className="mb-4">
+                <div className="mb-1 text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                  Loaded references ({adminRefs.length})
+                </div>
+                {adminRefs.length === 0 ? (
+                  <div className="border-2 border-dashed border-[#0d0d0d]/30 bg-white p-3 text-xs text-[#2d2d2d]/60">
+                    No reference files loaded. Add other classes' saved .aadhi files to compare.
+                  </div>
+                ) : (
+                  <ul className="space-y-1">
+                    {adminRefs.map((r) => (
+                      <li
+                        key={r.id}
+                        className="flex items-center justify-between border border-[#0d0d0d]/30 bg-white px-2 py-1 text-xs"
+                      >
+                        <span className="truncate">
+                          <span className="font-semibold">{r.name}</span>
+                          <span className="ml-2 text-[#2d2d2d]/60">
+                            {r.state.classes.length} class{r.state.classes.length === 1 ? "" : "es"} ·
+                            {" "}{r.state.fromDate} → {r.state.toDate}
+                          </span>
+                        </span>
+                        <button
+                          onClick={() => setAdminRefs((prev) => prev.filter((x) => x.id !== r.id))}
+                          className="ml-2 border border-red-700 px-1.5 py-0.5 text-[10px] font-bold uppercase text-red-700 hover:bg-red-50"
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                    Faculty conflicts across all timetables
+                  </div>
+                  <span
+                    className={
+                      "border-2 px-2 py-0.5 text-[10px] font-bold uppercase " +
+                      (adminReport.length === 0
+                        ? "border-green-700 bg-green-50 text-green-700"
+                        : "border-red-700 bg-red-50 text-red-700")
+                    }
+                  >
+                    {adminReport.length === 0 ? "No conflicts" : `${adminReport.length} conflict${adminReport.length === 1 ? "" : "s"}`}
+                  </span>
+                </div>
+                {adminReport.length > 0 && (
+                  <div className="max-h-[40vh] overflow-y-auto border-2 border-[#0d0d0d] bg-white">
+                    <table className="w-full border-collapse text-[11px]">
+                      <thead className="sticky top-0 bg-[#0d0d0d] text-white">
+                        <tr>
+                          <th className="border border-[#0d0d0d]/40 px-2 py-1 text-left">Date</th>
+                          <th className="border border-[#0d0d0d]/40 px-2 py-1 text-left">Period</th>
+                          <th className="border border-[#0d0d0d]/40 px-2 py-1 text-left">Faculty conflict</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminReport.map((row) => {
+                          const facMap = new Map<string, typeof row.conflicts>();
+                          row.conflicts.forEach((c) => {
+                            const list = facMap.get(c.faculty) ?? [];
+                            list.push(c);
+                            facMap.set(c.faculty, list);
+                          });
+                          return (
+                            <tr key={row.key} className="odd:bg-[#f5f3ee]">
+                              <td className="border border-[#0d0d0d]/20 px-2 py-1 align-top" style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
+                                {row.date}
+                              </td>
+                              <td className="border border-[#0d0d0d]/20 px-2 py-1 align-top" style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
+                                {periodLabelFor(row.slotIdx)}
+                              </td>
+                              <td className="border border-[#0d0d0d]/20 px-2 py-1 align-top">
+                                {Array.from(facMap.entries()).map(([faculty, entries]) => (
+                                  <div key={faculty} className="mb-1 last:mb-0">
+                                    <span className="font-bold">{faculty}</span>
+                                    <span className="text-[#2d2d2d]/70"> — busy in </span>
+                                    {entries.map((e, i) => (
+                                      <span key={i} className="mr-1 inline-block border border-[#0d0d0d]/40 bg-white px-1">
+                                        {e.origin} / {e.className} · {e.courseName}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ))}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {adminReport.length === 0 && adminRefs.length > 0 && (
+                  <div className="border-2 border-green-700 bg-green-50 p-3 text-xs text-green-800">
+                    All references cross-checked — no shared faculty is double-booked in the same date + period.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
