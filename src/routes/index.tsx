@@ -29,7 +29,7 @@ type Cell =
   | { kind: "empty" }
   | { kind: "break"; label: string }
   | { kind: "blocked"; label: string }
-  | { kind: "course"; courseId: string };
+  | { kind: "course"; courseId: string; locked?: boolean };
 
 type Course = {
   id: string;
