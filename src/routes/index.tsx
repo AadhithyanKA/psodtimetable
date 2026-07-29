@@ -1394,10 +1394,8 @@ function Index() {
     label: string,
     opts: { overwrite: boolean; strictRules?: boolean }
   ) => {
-    if (state.frozen) {
-      setAutoFillReport("Timetable is frozen — unfreeze to run auto-fill.");
-      return;
-    }
+    // When frozen we still allow auto-fill to run: locked cells are preserved
+    // and only empty slots receive new placements.
     setAutoStatus({ label, phase: "Preparing…" });
     // Yield twice so the overlay paints before the synchronous solver runs.
     requestAnimationFrame(() => {
