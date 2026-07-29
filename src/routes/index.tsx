@@ -3621,6 +3621,166 @@ function Index() {
           <style>{`@keyframes autofill{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}`}</style>
         </div>
       )}
+      {adminOpen && (
+        <div
+          className="fixed inset-0 z-[90] bg-[#0d0d0d]/50 p-4 backdrop-blur-sm"
+          onClick={() => setAdminOpen(false)}
+        >
+          <div
+            className="absolute left-1/2 top-1/2 flex max-h-[85vh] w-[min(760px,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col border-2 border-[#0d0d0d] bg-[#f5f3ee] shadow-[8px_8px_0px_0px_#0d0d0d]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b-2 border-[#0d0d0d] bg-indigo-700 px-4 py-3 text-white">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-white/70">Admin Mode</div>
+                <div className="text-sm font-bold" style={{ fontFamily: "'Sora', system-ui, sans-serif" }}>
+                  Cross-check timetables across classes
+                </div>
+              </div>
+              <button
+                onClick={() => setAdminOpen(false)}
+                className="border-2 border-white bg-transparent px-3 py-1 text-[11px] font-bold uppercase tracking-wider hover:bg-white hover:text-indigo-700"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              <input
+                ref={adminInputRef}
+                type="file"
+                accept=".aadhi,application/json"
+                multiple
+                className="hidden"
+                onChange={async (e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  for (const f of files) await loadAdminReference(f);
+                  e.target.value = "";
+                }}
+              />
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => adminInputRef.current?.click()}
+                  className="border-2 border-[#0d0d0d] bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
+                >
+                  Load reference .aadhi
+                </button>
+                {adminRefs.length > 0 && (
+                  <button
+                    onClick={() => setAdminRefs([])}
+                    className="border-2 border-red-700 bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-red-700 hover:bg-red-50"
+                  >
+                    Clear all
+                  </button>
+                )}
+                <span className="text-[11px] text-[#2d2d2d]/70">
+                  Loaded references are held in memory only — nothing is written back.
+                </span>
+              </div>
+              <div className="mb-4">
+                <div className="mb-1 text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                  Loaded references ({adminRefs.length})
+                </div>
+                {adminRefs.length === 0 ? (
+                  <div className="border-2 border-dashed border-[#0d0d0d]/30 bg-white p-3 text-xs text-[#2d2d2d]/60">
+                    No reference files loaded. Add other classes' saved .aadhi files to compare.
+                  </div>
+                ) : (
+                  <ul className="space-y-1">
+                    {adminRefs.map((r) => (
+                      <li
+                        key={r.id}
+                        className="flex items-center justify-between border border-[#0d0d0d]/30 bg-white px-2 py-1 text-xs"
+                      >
+                        <span className="truncate">
+                          <span className="font-semibold">{r.name}</span>
+                          <span className="ml-2 text-[#2d2d2d]/60">
+                            {r.state.classes.length} class{r.state.classes.length === 1 ? "" : "es"} ·
+                            {" "}{r.state.fromDate} → {r.state.toDate}
+                          </span>
+                        </span>
+                        <button
+                          onClick={() => setAdminRefs((prev) => prev.filter((x) => x.id !== r.id))}
+                          className="ml-2 border border-red-700 px-1.5 py-0.5 text-[10px] font-bold uppercase text-red-700 hover:bg-red-50"
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                    Faculty conflicts across all timetables
+                  </div>
+                  <span
+                    className={
+                      "border-2 px-2 py-0.5 text-[10px] font-bold uppercase " +
+                      (adminReport.length === 0
+                        ? "border-green-700 bg-green-50 text-green-700"
+                        : "border-red-700 bg-red-50 text-red-700")
+                    }
+                  >
+                    {adminReport.length === 0 ? "No conflicts" : `${adminReport.length} conflict${adminReport.length === 1 ? "" : "s"}`}
+                  </span>
+                </div>
+                {adminReport.length > 0 && (
+                  <div className="max-h-[40vh] overflow-y-auto border-2 border-[#0d0d0d] bg-white">
+                    <table className="w-full border-collapse text-[11px]">
+                      <thead className="sticky top-0 bg-[#0d0d0d] text-white">
+                        <tr>
+                          <th className="border border-[#0d0d0d]/40 px-2 py-1 text-left">Date</th>
+                          <th className="border border-[#0d0d0d]/40 px-2 py-1 text-left">Period</th>
+                          <th className="border border-[#0d0d0d]/40 px-2 py-1 text-left">Faculty conflict</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminReport.map((row) => {
+                          const facMap = new Map<string, typeof row.conflicts>();
+                          row.conflicts.forEach((c) => {
+                            const list = facMap.get(c.faculty) ?? [];
+                            list.push(c);
+                            facMap.set(c.faculty, list);
+                          });
+                          return (
+                            <tr key={row.key} className="odd:bg-[#f5f3ee]">
+                              <td className="border border-[#0d0d0d]/20 px-2 py-1 align-top" style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
+                                {row.date}
+                              </td>
+                              <td className="border border-[#0d0d0d]/20 px-2 py-1 align-top" style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
+                                {periodLabelFor(row.slotIdx)}
+                              </td>
+                              <td className="border border-[#0d0d0d]/20 px-2 py-1 align-top">
+                                {Array.from(facMap.entries()).map(([faculty, entries]) => (
+                                  <div key={faculty} className="mb-1 last:mb-0">
+                                    <span className="font-bold">{faculty}</span>
+                                    <span className="text-[#2d2d2d]/70"> — busy in </span>
+                                    {entries.map((e, i) => (
+                                      <span key={i} className="mr-1 inline-block border border-[#0d0d0d]/40 bg-white px-1">
+                                        {e.origin} / {e.className} · {e.courseName}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ))}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {adminReport.length === 0 && adminRefs.length > 0 && (
+                  <div className="border-2 border-green-700 bg-green-50 p-3 text-xs text-green-800">
+                    All references cross-checked — no shared faculty is double-booked in the same date + period.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
