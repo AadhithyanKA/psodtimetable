@@ -2727,6 +2727,13 @@ function Index() {
                 Save
               </button>
               <button
+                onClick={() => setAdminOpen(true)}
+                className="border-2 border-indigo-700 bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-indigo-700 transition-transform hover:bg-indigo-50 active:translate-y-0.5"
+                title="Admin mode: load other classes' .aadhi files to cross-check all timetables"
+              >
+                Admin
+              </button>
+              <button
                 onClick={exportCSV}
                 className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
               >
