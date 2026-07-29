@@ -522,6 +522,12 @@ function Index() {
   const [adminRefs, setAdminRefs] = useState<
     Array<{ id: string; name: string; state: State }>
   >([]);
+  const [warningsPanelOpen, setWarningsPanelOpen] = useState(false);
+  const [pendingScroll, setPendingScroll] = useState<{
+    classId: string;
+    date: string;
+    slotIdx: number;
+  } | null>(null);
 
   // Map slot index → 1-based period number, skipping breaks.
   const periodNumberFor = (slotIdx: number): number =>
@@ -614,11 +620,38 @@ function Index() {
     return () => window.cancelAnimationFrame(frame);
   }, [activeClass, pendingScrollClassId, state.classes]);
 
-  // Conflict detection across classes
+  // Effect to handle scroll and highlight when navigating to conflicts
+  useEffect(() => {
+    if (pendingScroll && activeClassId === pendingScroll.classId) {
+      const timer = setTimeout(() => {
+        const cellId = `cell-${pendingScroll.classId}-${pendingScroll.date}-${pendingScroll.slotIdx}`;
+        const element = document.getElementById(cellId);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+          element.classList.add("cell-highlight-flash");
+          setTimeout(() => {
+            element.classList.remove("cell-highlight-flash");
+          }, 3000);
+        }
+        setPendingScroll(null);
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [activeClassId, pendingScroll]);
+
+  // Conflict detection across classes (global check)
   const conflicts = useMemo(() => {
     const set = new Set<string>();
     if (state.frozen) return set;
-    dates.forEach((date) => {
+
+    const union = new Set<string>();
+    state.classes.forEach((cls) => {
+      const clsDates = daysBetween(classFromDate(cls, state), classToDate(cls, state));
+      clsDates.forEach((d) => union.add(d));
+    });
+    const allDates = Array.from(union);
+
+    allDates.forEach((date) => {
       state.slots.forEach((_, i) => {
         const key = `${date}-${i}`;
         const facultyToClass: Record<string, string[]> = {};
@@ -643,7 +676,110 @@ function Index() {
       });
     });
     return set;
-  }, [state, dates]);
+  }, [state]);
+
+  const conflictDetailsList = useMemo(() => {
+    const list: Array<{
+      id: string;
+      classId: string;
+      className: string;
+      date: string;
+      weekday: string;
+      slotIdx: number;
+      periodLabel: string;
+      type: "faculty" | "rule";
+      faculty?: string;
+      courseName?: string;
+      description: string;
+    }> = [];
+
+    if (state.frozen) return list;
+
+    const union = new Set<string>();
+    state.classes.forEach((cls) => {
+      const clsDates = daysBetween(classFromDate(cls, state), classToDate(cls, state));
+      clsDates.forEach((d) => union.add(d));
+    });
+    const allDates = Array.from(union).sort();
+
+    allDates.forEach((date) => {
+      const dayOfWeek = utcDateFromIso(date)?.getUTCDay() ?? 0;
+      const dayName = WEEKDAY_FULL[dayOfWeek];
+      state.slots.forEach((_, i) => {
+        const key = `${date}-${i}`;
+        const facultyToClass: Record<
+          string,
+          Array<{ classId: string; className: string; courseName: string }>
+        > = {};
+
+        state.classes.forEach((cls) => {
+          const cell = cls.grid[key];
+          if (cell?.kind === "course") {
+            const course = cls.courses.find((c) => c.id === cell.courseId);
+            if (!course) return;
+
+            getFaculties(course).forEach((f) => {
+              (facultyToClass[f] ??= []).push({
+                classId: cls.id,
+                className: cls.name,
+                courseName: course.name || course.id,
+              });
+            });
+
+            // Rule violation
+            if (!courseAllowedOn(course, date) || !courseAllowedSlotOn(course, i, date)) {
+              list.push({
+                id: `${cls.id}:${key}:rule`,
+                classId: cls.id,
+                className: cls.name,
+                date,
+                weekday: dayName,
+                slotIdx: i,
+                periodLabel: periodLabelFor(i),
+                type: "rule",
+                courseName: course.name || course.id,
+                description: `Course "${course.name || course.id}" is placed on a slot/weekday not allowed by its rules.`,
+              });
+            }
+          }
+        });
+
+        // Faculty conflicts
+        Object.entries(facultyToClass).forEach(([faculty, assignments]) => {
+          const uniqueClassIds = Array.from(new Set(assignments.map((a) => a.classId)));
+          if (uniqueClassIds.length > 1) {
+            assignments.forEach((assignment) => {
+              const others = assignments
+                .filter((a) => a.classId !== assignment.classId)
+                .map((a) => `"${a.courseName}" in ${a.className}`)
+                .join(" & ");
+
+              list.push({
+                id: `${assignment.classId}:${key}:faculty:${faculty}`,
+                classId: assignment.classId,
+                className: assignment.className,
+                date,
+                weekday: dayName,
+                slotIdx: i,
+                periodLabel: periodLabelFor(i),
+                type: "faculty",
+                faculty,
+                description: `Faculty "${faculty}" is also scheduled for ${others}.`,
+              });
+            });
+          }
+        });
+      });
+    });
+
+    list.sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      if (a.slotIdx !== b.slotIdx) return a.slotIdx - b.slotIdx;
+      return a.className.localeCompare(b.className);
+    });
+
+    return list;
+  }, [state, periodLabelFor]);
 
   const applyTool = (date: string, slotIdx: number, tool: Tool) => {
     if (state.frozen) {
@@ -1819,10 +1955,34 @@ function Index() {
         return;
       }
       const normalized = normalizeStateSnapshot(loaded);
+
+      // Give imported classes unique IDs and check for clashing names
+      const uniqueClasses = normalized.classes.map((cls, idx) => {
+        const nameClash = state.classes.some((c) => c.name === cls.name);
+        const name = nameClash ? `${cls.name} (${file.name.replace(/\.aadhi$/, "")})` : cls.name;
+        return {
+          ...cls,
+          id: `k${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+          name,
+        };
+      });
+
+      setState((prev) => ({
+        ...prev,
+        classes: [...prev.classes, ...uniqueClasses],
+      }));
+
       setAdminRefs((prev) => [
         ...prev,
         { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: file.name, state: normalized },
       ]);
+
+      if (uniqueClasses.length > 0) {
+        setActiveClassId(uniqueClasses[0].id);
+      }
+
+      setWarningsPanelOpen(true);
+      setAutoFillReport(`Imported ${uniqueClasses.length} class(es) from "${file.name}" as active classes. Check warnings panel for overlaps.`);
     } catch {
       alert(`Could not read "${file.name}".`);
     }
@@ -1959,6 +2119,18 @@ function Index() {
     });
     return map;
   }, [activeClass, dates, state.slots]);
+
+  const handleWarningClick = (warning: typeof conflictDetailsList[0]) => {
+    setActiveClassId(warning.classId);
+    setPendingScroll({
+      classId: warning.classId,
+      date: warning.date,
+      slotIdx: warning.slotIdx,
+    });
+    if (window.innerWidth < 768) {
+      setWarningsPanelOpen(false);
+    }
+  };
 
   return (
     <div
@@ -2733,6 +2905,15 @@ function Index() {
               >
                 Admin
               </button>
+              {conflictDetailsList.length > 0 && (
+                <button
+                  onClick={() => setWarningsPanelOpen(true)}
+                  className="border-2 border-red-600 bg-red-50 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-red-700 transition-transform hover:bg-red-100 active:translate-y-0.5"
+                  title="Show overlap & rule warnings panel"
+                >
+                  ⚠️ Warnings ({conflictDetailsList.length})
+                </button>
+              )}
               <button
                 onClick={exportCSV}
                 className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
@@ -2843,10 +3024,17 @@ function Index() {
 
           {/* Alerts */}
           <div className="space-y-2 px-4 pt-4 sm:px-8">
-            {hasConflicts && (
-              <div className="border-2 border-red-600 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
-                Faculty conflict — the same teacher is scheduled in two classes at the same time (red cells).
-              </div>
+            {conflictDetailsList.length > 0 && (
+              <button
+                onClick={() => setWarningsPanelOpen(true)}
+                className="w-full text-left flex items-center justify-between border-2 border-red-600 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100 transition shadow-[2px_2px_0px_0px_#dc2626]"
+              >
+                <span className="flex items-center gap-2">
+                  <span className="text-sm">⚠️</span>
+                  <span>Faculty Overlaps / Rule Violations — <b>{conflictDetailsList.length} warning{conflictDetailsList.length === 1 ? "" : "s"}</b> detected. Click to view list and locate conflicts.</span>
+                </span>
+                <span className="underline text-[10px] font-bold uppercase tracking-wider bg-white border border-red-600 px-2 py-0.5 text-red-700 shadow-[1px_1px_0_#dc2626] transition hover:bg-red-50">Open Panel</span>
+              </button>
             )}
             {dates.length === 0 && (
               <div className="border-2 border-[#d97706] bg-[#fef3c7] px-3 py-2 text-xs font-semibold text-[#b45309]">
@@ -2939,6 +3127,7 @@ function Index() {
                           return (
                             <td
                               key={i}
+                              id={`cell-${activeClass.id}-${date}-${i}`}
                               onMouseDown={(e) => onCellMouseDown(date, i, e)}
                               onMouseEnter={(e) => onCellEnter(date, i, e)}
                               onContextMenu={(e) => e.preventDefault()}
@@ -3618,7 +3807,34 @@ function Index() {
             </div>
             <div className="text-[11px] text-[#2d2d2d]/80">{autoStatus.phase}</div>
           </div>
-          <style>{`@keyframes autofill{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}`}</style>
+          <style>{`
+            @keyframes autofill {
+              0% { transform: translateX(-100%); }
+              100% { transform: translateX(400%); }
+            }
+            @keyframes cellHighlight {
+              0% {
+                outline: 4px solid #dc2626;
+                outline-offset: 2px;
+                box-shadow: 0 0 0 8px rgba(220, 38, 38, 0.4);
+                background-color: #fef2f2;
+              }
+              50% {
+                outline: 4px solid #f87171;
+                outline-offset: 2px;
+                box-shadow: 0 0 0 12px rgba(248, 113, 113, 0.2);
+                background-color: #fee2e2;
+              }
+              100% {
+                outline: 4px solid transparent;
+                outline-offset: 0px;
+                box-shadow: 0 0 0 0px transparent;
+              }
+            }
+            .cell-highlight-flash {
+              animation: cellHighlight 3s ease-out;
+            }
+          `}</style>
         </div>
       )}
       {adminOpen && (
@@ -3781,6 +3997,76 @@ function Index() {
           </div>
         </div>
       )}
+      {/* Warnings Panel Backdrop Overlay */}
+      {warningsPanelOpen && (
+        <div
+          className="fixed inset-0 z-[90] bg-[#0d0d0d]/35 backdrop-blur-[2px]"
+          onClick={() => setWarningsPanelOpen(false)}
+        />
+      )}
+      {/* Warnings Panel Drawer */}
+      <div
+        className={`fixed right-0 top-0 h-full w-[min(450px,100vw)] bg-[#f5f3ee] border-l-2 border-[#0d0d0d] shadow-[0_0_50px_rgba(0,0,0,0.3)] z-[95] flex flex-col transition-transform duration-300 ease-in-out ${
+          warningsPanelOpen ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
+        <div className="flex items-center justify-between border-b-2 border-[#0d0d0d] bg-red-700 px-4 py-3 text-white">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-white/70">Timetable Checker</div>
+            <div className="text-sm font-bold" style={{ fontFamily: "'Sora', system-ui, sans-serif" }}>
+              Overlap & Rule Warnings ({conflictDetailsList.length})
+            </div>
+          </div>
+          <button
+            onClick={() => setWarningsPanelOpen(false)}
+            className="border-2 border-white bg-transparent px-3 py-1 text-[11px] font-bold uppercase tracking-wider hover:bg-white hover:text-red-700 transition"
+          >
+            Close
+          </button>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {conflictDetailsList.length === 0 ? (
+            <div className="border-2 border-dashed border-green-700 bg-green-50 p-6 text-center text-green-800">
+              <span className="text-2xl block mb-2">🎉</span>
+              <div className="font-bold text-sm">No Conflicts Found</div>
+              <div className="text-xs text-green-700/80 mt-1">All classes look good! No faculty double-bookings or rule violations.</div>
+            </div>
+          ) : (
+            conflictDetailsList.map((warn) => (
+              <button
+                key={warn.id}
+                onClick={() => handleWarningClick(warn)}
+                className="w-full text-left border-2 border-[#0d0d0d] bg-white p-3 hover:bg-[#e8e4dd] transition-all hover:-translate-y-0.5 hover:shadow-[3px_3px_0px_0px_#0d0d0d] flex flex-col gap-2 group active:translate-y-0 active:shadow-[1px_1px_0px_0px_#0d0d0d]"
+              >
+                <div className="flex items-center justify-between w-full">
+                  <span className={`px-2 py-0.5 text-[9px] font-bold uppercase border ${
+                    warn.type === 'faculty' 
+                      ? 'border-red-600 bg-red-50 text-red-700' 
+                      : 'border-amber-600 bg-amber-50 text-amber-700'
+                  }`}>
+                    {warn.type === 'faculty' ? 'Faculty Overlap' : 'Rule Violation'}
+                  </span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider bg-[#0d0d0d]/5 px-1.5 py-0.5 rounded">
+                    {warn.className}
+                  </span>
+                </div>
+                
+                <div className="text-xs font-semibold text-[#0d0d0d]">
+                  {warn.description}
+                </div>
+                
+                <div className="flex items-center justify-between text-[10px] text-[#2d2d2d]/60 font-mono mt-1 border-t border-dashed border-[#0d0d0d]/10 pt-2 w-full">
+                  <span>{warn.weekday}, {warn.date} · {warn.periodLabel}</span>
+                  <span className="text-[9px] font-bold uppercase text-indigo-700 group-hover:underline flex items-center gap-1">
+                    Locate Cell &rarr;
+                  </span>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }
