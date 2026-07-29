@@ -926,7 +926,7 @@ function Index() {
         mutableClasses.forEach((cls) => {
           Object.keys(cls.grid).forEach((k) => {
             const cell = cls.grid[k];
-            if (cell && cell.kind === "course") delete cls.grid[k];
+            if (cell && cell.kind === "course" && !cell.locked) delete cls.grid[k];
           });
         });
       }
@@ -939,6 +939,9 @@ function Index() {
             const key = `${date}-${idx}`;
             const cell = cls.grid[key];
             if (cell?.kind !== "course" || cell.courseId !== courseId) break;
+            // Never remove frozen/locked placements — they are permanent
+            // overrides and must survive Fill by Rules.
+            if (cell.locked) { idx++; continue; }
             delete cls.grid[key];
             removed++;
             idx++;
@@ -952,6 +955,7 @@ function Index() {
                 const key = `${date}-${slotIdx}`;
                 const cell = cls.grid[key];
                 if (cell?.kind !== "course") continue;
+                if (cell.locked) continue;
                 const prev = slotIdx > 0 ? cls.grid[`${date}-${slotIdx - 1}`] : undefined;
                 if (prev?.kind === "course" && prev.courseId === cell.courseId) continue;
                 const course = cls.courses.find((c) => c.id === cell.courseId);
@@ -991,6 +995,7 @@ function Index() {
                 if (!mutableClasses.includes(cls)) return;
                 const cell = cls.grid[key];
                 if (cell?.kind !== "course") return;
+                if (cell.locked) return;
                 delete cls.grid[key];
                 removed++;
               });
