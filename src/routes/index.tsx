@@ -1807,6 +1807,75 @@ function Index() {
     }
   };
 
+  // ---- Admin cross-check: load additional .aadhi files as reference and
+  // report faculty conflicts between them and the currently open timetable.
+  const loadAdminReference = async (file: File) => {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const loaded: SavedState | undefined = parsed?.state ?? parsed;
+      if (!loaded || !Array.isArray(loaded.classes) || !Array.isArray(loaded.slots)) {
+        alert(`"${file.name}" doesn't look like a valid .aadhi file.`);
+        return;
+      }
+      const normalized = normalizeStateSnapshot(loaded);
+      setAdminRefs((prev) => [
+        ...prev,
+        { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: file.name, state: normalized },
+      ]);
+    } catch {
+      alert(`Could not read "${file.name}".`);
+    }
+  };
+
+  const adminReport = useMemo(() => {
+    // Build (date, slot) → list of { origin, className, courseName, faculty }
+    type Placement = { origin: string; className: string; courseName: string; faculty: string };
+    const rows: Array<{ key: string; date: string; slotIdx: number; conflicts: Placement[] }> = [];
+    if (!adminOpen || adminRefs.length === 0) return rows;
+    const sources: Array<{ origin: string; state: State }> = [
+      { origin: "This file", state },
+      ...adminRefs.map((r) => ({ origin: r.name, state: r.state })),
+    ];
+    // Group placements by key
+    const byKey = new Map<string, Placement[]>();
+    sources.forEach(({ origin, state: st }) => {
+      st.classes.forEach((cls) => {
+        Object.entries(cls.grid).forEach(([key, cell]) => {
+          if (cell.kind !== "course") return;
+          const course = cls.courses.find((c) => c.id === cell.courseId);
+          if (!course) return;
+          getFaculties(course).forEach((faculty) => {
+            const list = byKey.get(key) ?? [];
+            list.push({ origin, className: cls.name, courseName: course.name || course.id, faculty });
+            byKey.set(key, list);
+          });
+        });
+      });
+    });
+    byKey.forEach((list, key) => {
+      const byFaculty = new Map<string, Placement[]>();
+      list.forEach((p) => {
+        const b = byFaculty.get(p.faculty) ?? [];
+        b.push(p);
+        byFaculty.set(p.faculty, b);
+      });
+      const clashes: Placement[] = [];
+      byFaculty.forEach((ps) => {
+        // Only count as a clash if the same faculty appears in more than one
+        // (origin,className) pair at this slot.
+        const distinct = new Set(ps.map((p) => `${p.origin}⧫${p.className}`));
+        if (distinct.size > 1) clashes.push(...ps);
+      });
+      if (clashes.length > 0) {
+        const [d, sIdxStr] = key.split(/-(?=\d+$)/);
+        rows.push({ key, date: d, slotIdx: parseInt(sIdxStr, 10), conflicts: clashes });
+      }
+    });
+    rows.sort((a, b) => (a.date === b.date ? a.slotIdx - b.slotIdx : a.date.localeCompare(b.date)));
+    return rows;
+  }, [adminOpen, adminRefs, state]);
+
   const cellDisplay = (cell: Cell | undefined, courses: Course[]) => {
     if (!cell || cell.kind === "empty") return { text: "", bg: "#fff", fg: "#94a3b8" };
     if (cell.kind === "break") return { text: cell.label, bg: "#fef3c7", fg: "#92400e" };
