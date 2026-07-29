@@ -3041,7 +3041,21 @@ function Index() {
                   if (!state.frozen) {
                     if (!confirm("Freeze the timetable? This locks all cells, hides conflict warnings, and makes overrides permanent. You can unfreeze later.")) return;
                   }
-                  setState((s) => ({ ...s, frozen: !s.frozen }));
+                  setState((s) => {
+                    const nextFrozen = !s.frozen;
+                    if (!nextFrozen) return { ...s, frozen: false };
+                    // Lock every existing course placement so future auto-fills
+                    // (and any subsequent unfreeze + edit) cannot silently
+                    // remove or overwrite the manually reviewed timetable.
+                    const classes = s.classes.map((cls) => {
+                      const grid: Record<string, Cell> = {};
+                      Object.entries(cls.grid).forEach(([k, cell]) => {
+                        grid[k] = cell.kind === "course" ? { ...cell, locked: true } : cell;
+                      });
+                      return { ...cls, grid };
+                    });
+                    return { ...s, frozen: true, classes };
+                  });
                 }}
                 className={
                   "flex items-center gap-2 border-2 px-2 py-1 text-[11px] font-bold uppercase tracking-wider transition " +
