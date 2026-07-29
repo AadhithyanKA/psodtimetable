@@ -517,6 +517,11 @@ function Index() {
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const adminInputRef = useRef<HTMLInputElement>(null);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [adminRefs, setAdminRefs] = useState<
+    Array<{ id: string; name: string; state: State }>
+  >([]);
 
   // Map slot index → 1-based period number, skipping breaks.
   const periodNumberFor = (slotIdx: number): number =>
