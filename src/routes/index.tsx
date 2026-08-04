@@ -87,6 +87,30 @@ const stateForClass = <T extends { fromDate: string; toDate: string }>(
   cls: Pick<ClassData, "fromDate" | "toDate">,
   s: T,
 ): T => ({ ...s, fromDate: classFromDate(cls, s), toDate: classToDate(cls, s) });
+
+const weekIndexForDate = (
+  cls: Pick<ClassData, "fromDate">,
+  s: { fromDate: string },
+  date: string,
+): number => {
+  const start = utcDateFromIso(classFromDate(cls, s));
+  const cur = utcDateFromIso(date);
+  if (!start || !cur) return 1;
+
+  const startDay = start.getUTCDay();
+  const startOffset = startDay === 0 ? 6 : startDay - 1;
+  const startMonday = new Date(start.getTime());
+  startMonday.setUTCDate(startMonday.getUTCDate() - startOffset);
+  startMonday.setUTCHours(0, 0, 0, 0);
+
+  const curDay = cur.getUTCDay();
+  const curOffset = curDay === 0 ? 6 : curDay - 1;
+  const curMonday = new Date(cur.getTime());
+  curMonday.setUTCDate(curMonday.getUTCDate() - curOffset);
+  curMonday.setUTCHours(0, 0, 0, 0);
+
+  return Math.floor((curMonday.getTime() - startMonday.getTime()) / (7 * 86400000)) + 1;
+};
 type Slot = { start: string; end: string; isBreak?: boolean }; // 24h "HH:MM"
 type State = {
   fromDate: string; // YYYY-MM-DD
@@ -99,8 +123,14 @@ type State = {
 };
 
 const COLORS = [
-  "#fdba74", "#fcd34d", "#86efac", "#67e8f9",
-  "#93c5fd", "#c4b5fd", "#f9a8d4", "#a7f3d0",
+  "#fdba74",
+  "#fcd34d",
+  "#86efac",
+  "#67e8f9",
+  "#93c5fd",
+  "#c4b5fd",
+  "#f9a8d4",
+  "#a7f3d0",
 ];
 const STORAGE_KEY = "timetable-maker-v5";
 const INITIAL_FROM_DATE = "2026-07-25";
@@ -132,7 +162,20 @@ const daysBetween = (from: string, to: string): string[] => {
   for (let i = 0; i <= diff; i++) out.push(addDays(from, i));
   return out;
 };
-const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTH_SHORT = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const dayLabel = (iso: string) => {
   const d = utcDateFromIso(iso) ?? new Date(Date.UTC(2026, 6, 25));
@@ -141,8 +184,7 @@ const dayLabel = (iso: string) => {
     date: `${d.getUTCDate()} ${MONTH_SHORT[d.getUTCMonth()] ?? "Jan"}`,
   };
 };
-const weekdayOf = (iso: string): number =>
-  utcDateFromIso(iso)?.getUTCDay() ?? 0;
+const weekdayOf = (iso: string): number => utcDateFromIso(iso)?.getUTCDay() ?? 0;
 const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
 const WEEKDAY_FULL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 // Faculty helpers. A course's `faculty` field may hold one name or several
@@ -159,10 +201,7 @@ const getFaculties = (course: Pick<Course, "faculty">): string[] => {
 };
 const facultyKey = (course: Pick<Course, "faculty">): string =>
   getFaculties(course).slice().sort().join("|");
-const sharesFaculty = (
-  a: Pick<Course, "faculty">,
-  b: Pick<Course, "faculty">,
-): boolean => {
+const sharesFaculty = (a: Pick<Course, "faculty">, b: Pick<Course, "faculty">): boolean => {
   const set = new Set(getFaculties(a));
   return getFaculties(b).some((f) => set.has(f));
 };
@@ -183,21 +222,14 @@ const courseAllowedSlot = (course: Course, slotIdx: number): boolean => {
   return rule.includes(slotIdx);
 };
 // Weekday-aware slot check. Per-weekday override wins over allowedSlots.
-const courseAllowedSlotOn = (
-  course: Course,
-  slotIdx: number,
-  iso: string,
-): boolean => {
+const courseAllowedSlotOn = (course: Course, slotIdx: number, iso: string): boolean => {
   const perDay = course.allowedSlotsByWeekday?.[weekdayOf(iso)];
   if (perDay !== undefined) return perDay.includes(slotIdx);
   return courseAllowedSlot(course, slotIdx);
 };
 // Effective allowed slot indices for a course on a given date (weekday-aware).
 // Returns null when "all periods" are allowed (no restriction).
-const effectiveAllowedSlots = (
-  course: Course,
-  iso: string,
-): number[] | null => {
+const effectiveAllowedSlots = (course: Course, iso: string): number[] | null => {
   const perDay = course.allowedSlotsByWeekday?.[weekdayOf(iso)];
   if (perDay !== undefined) return [...perDay].sort((a, b) => a - b);
   const base = course.allowedSlots;
@@ -237,9 +269,30 @@ const DEFAULT_SLOTS: Slot[] = [
 function defaultState(from = isoToday()): State {
   const to = addDays(from, 4);
   const seedCourses: Course[] = [
-    { id: "c1", name: "Mathematics", faculty: "Dr. Smith", color: COLORS[0], durationSlots: 1, weeklyPeriods: 4 },
-    { id: "c2", name: "Physics", faculty: "Dr. Jones", color: COLORS[2], durationSlots: 1, weeklyPeriods: 3 },
-    { id: "c3", name: "Chemistry", faculty: "Dr. Patel", color: COLORS[4], durationSlots: 1, weeklyPeriods: 3 },
+    {
+      id: "c1",
+      name: "Mathematics",
+      faculty: "Dr. Smith",
+      color: COLORS[0],
+      durationSlots: 1,
+      weeklyPeriods: 4,
+    },
+    {
+      id: "c2",
+      name: "Physics",
+      faculty: "Dr. Jones",
+      color: COLORS[2],
+      durationSlots: 1,
+      weeklyPeriods: 3,
+    },
+    {
+      id: "c3",
+      name: "Chemistry",
+      faculty: "Dr. Patel",
+      color: COLORS[4],
+      durationSlots: 1,
+      weeklyPeriods: 3,
+    },
   ];
   const mkGrid = (): Record<string, Cell> => ({});
   const cloneCourses = (): Course[] => seedCourses.map((c) => ({ ...c }));
@@ -306,12 +359,23 @@ const courseCycleForDate = (
   state: { fromDate: string; toDate: string },
   iso: string,
 ): number | null => {
-  const range = effectiveCourseRange(course, state);
-  if (!range || iso < range.from || iso > range.to) return null;
-  const start = utcDateFromIso(range.from);
+  const start = utcDateFromIso(state.fromDate);
   const current = utcDateFromIso(iso);
   if (!start || !current || current < start) return null;
-  return Math.floor((current.getTime() - start.getTime()) / (7 * 86400000)) + 1;
+
+  const startDay = start.getUTCDay();
+  const startOffset = startDay === 0 ? 6 : startDay - 1;
+  const startMonday = new Date(start.getTime());
+  startMonday.setUTCDate(startMonday.getUTCDate() - startOffset);
+  startMonday.setUTCHours(0, 0, 0, 0);
+
+  const curDay = current.getUTCDay();
+  const curOffset = curDay === 0 ? 6 : curDay - 1;
+  const curMonday = new Date(current.getTime());
+  curMonday.setUTCDate(curMonday.getUTCDate() - curOffset);
+  curMonday.setUTCHours(0, 0, 0, 0);
+
+  return Math.floor((curMonday.getTime() - startMonday.getTime()) / (7 * 86400000)) + 1;
 };
 // Total sessions across the course's active range. Explicit totalSessions
 // overrides; otherwise LTPC → (L+T+P) × effective timetable weeks.
@@ -346,10 +410,7 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
   const { allowedPeriods, ...rest } = course;
   const rawAllowedSlots = rest.allowedSlots ?? allowedPeriods ?? [];
   const validSlotIdx = (idx: unknown) =>
-    typeof idx === "number" &&
-    idx >= 0 &&
-    idx < slots.length &&
-    !slots[idx].isBreak;
+    typeof idx === "number" && idx >= 0 && idx < slots.length && !slots[idx].isBreak;
   let allowedByWd: Record<number, number[]> | undefined;
   const rawByWd = (rest as { allowedSlotsByWeekday?: unknown }).allowedSlotsByWeekday;
   if (rawByWd && typeof rawByWd === "object") {
@@ -384,7 +445,9 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
       return n > 0 ? n : undefined;
     })(),
     allowedWeekdays: (rest.allowedWeekdays ?? []).filter((day) => day >= 0 && day <= 6),
-    allowedSlots: rawAllowedSlots.filter((idx) => idx >= 0 && idx < slots.length && !slots[idx].isBreak),
+    allowedSlots: rawAllowedSlots.filter(
+      (idx) => idx >= 0 && idx < slots.length && !slots[idx].isBreak,
+    ),
     allowedSlotsByWeekday: allowedByWd,
     fromDate: isValidIso(rest.fromDate) ? rest.fromDate : undefined,
     toDate: isValidIso(rest.toDate) ? rest.toDate : undefined,
@@ -392,15 +455,20 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
 };
 const normalizeStateSnapshot = (snapshot: SavedState): State => {
   const base = defaultState();
-  const slots = Array.isArray(snapshot.slots) && snapshot.slots.length > 0 ? snapshot.slots : base.slots;
+  const slots =
+    Array.isArray(snapshot.slots) && snapshot.slots.length > 0 ? snapshot.slots : base.slots;
   const legacyCourses = snapshot.courses?.map((course) => cleanCourse(course, slots));
-  const sourceClasses = Array.isArray(snapshot.classes) && snapshot.classes.length > 0 ? snapshot.classes : base.classes;
+  const sourceClasses =
+    Array.isArray(snapshot.classes) && snapshot.classes.length > 0
+      ? snapshot.classes
+      : base.classes;
   const classes: ClassData[] = sourceClasses.map((cls, index) => {
-    const savedCourses = cls.courses && cls.courses.length > 0
-      ? cls.courses.map((course) => cleanCourse(course, slots))
-      : legacyCourses
-        ? legacyCourses.map((course) => ({ ...course }))
-        : [];
+    const savedCourses =
+      cls.courses && cls.courses.length > 0
+        ? cls.courses.map((course) => cleanCourse(course, slots))
+        : legacyCourses
+          ? legacyCourses.map((course) => ({ ...course }))
+          : [];
     return {
       id: cls.id || `k${index + 1}`,
       name: cls.name || `Class ${String.fromCharCode(65 + index)}`,
@@ -440,7 +508,12 @@ const countCourseSessionsInDates = (
       for (let i = 0; i < span; i++) {
         const idx = slotIdx + i;
         const part = grid[`${date}-${idx}`];
-        if (idx >= slots.length || slots[idx]?.isBreak || part?.kind !== "course" || part.courseId !== course.id) {
+        if (
+          idx >= slots.length ||
+          slots[idx]?.isBreak ||
+          part?.kind !== "course" ||
+          part.courseId !== course.id
+        ) {
           hasFullSpan = false;
           break;
         }
@@ -457,7 +530,12 @@ const countCourseSessionsInDates = (
   return count;
 };
 
-const courseSpanFitsRules = (course: Course, slots: Slot[], date: string, start: number): boolean => {
+const courseSpanFitsRules = (
+  course: Course,
+  slots: Slot[],
+  date: string,
+  start: number,
+): boolean => {
   if (!courseAllowedOn(course, date)) return false;
   const span = cleanDurationSlots(course.durationSlots, slots);
   for (let i = 0; i < span; i++) {
@@ -477,9 +555,13 @@ const countCourseRuleCapacity = (course: Course, slots: Slot[], dateList: string
   return dateList.reduce((sum, date) => {
     if (!courseAllowedOn(course, date)) return sum;
     const starts = effectiveAllowedSlots(course, date) ?? nonBreakStarts;
-    const validStarts = starts.filter((start) => {
-      return start >= 0 && start < slots.length && courseSpanFitsRules(course, slots, date, start);
-    }).sort((a, b) => a - b);
+    const validStarts = starts
+      .filter((start) => {
+        return (
+          start >= 0 && start < slots.length && courseSpanFitsRules(course, slots, date, start)
+        );
+      })
+      .sort((a, b) => a - b);
     let count = 0;
     let nextFreeStart = 0;
     validStarts.forEach((start) => {
@@ -512,16 +594,16 @@ function Index() {
   const [autoFillReport, setAutoFillReport] = useState<string>("");
   const [autoStatus, setAutoStatus] = useState<{ label: string; phase: string } | null>(null);
   const [pendingScrollClassId, setPendingScrollClassId] = useState<string | null>(null);
-  const [pendingBlockCsv, setPendingBlockCsv] = useState<{ name: string; text: string } | null>(null);
+  const [pendingBlockCsv, setPendingBlockCsv] = useState<{ name: string; text: string } | null>(
+    null,
+  );
   const [blockReport, setBlockReport] = useState<string>("");
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const adminInputRef = useRef<HTMLInputElement>(null);
   const [adminOpen, setAdminOpen] = useState(false);
-  const [adminRefs, setAdminRefs] = useState<
-    Array<{ id: string; name: string; state: State }>
-  >([]);
+  const [adminRefs, setAdminRefs] = useState<Array<{ id: string; name: string; state: State }>>([]);
   const [warningsPanelOpen, setWarningsPanelOpen] = useState(false);
   const [pendingScroll, setPendingScroll] = useState<{
     classId: string;
@@ -545,7 +627,9 @@ function Index() {
       } else {
         setState(defaultState());
       }
-    } catch {}
+    } catch {
+      // Ignore
+    }
     setHydrated(true);
   }, []);
   useEffect(() => {
@@ -601,13 +685,7 @@ function Index() {
       activeClass
         ? daysBetween(classFromDate(activeClass, state), classToDate(activeClass, state))
         : daysBetween(state.fromDate, state.toDate),
-    [
-      activeClass?.id,
-      activeClass?.fromDate,
-      activeClass?.toDate,
-      state.fromDate,
-      state.toDate,
-    ],
+    [activeClass?.id, activeClass?.fromDate, activeClass?.toDate, state.fromDate, state.toDate],
   );
 
   useEffect(() => {
@@ -796,8 +874,14 @@ function Index() {
       const span = cleanDurationSlots(course.durationSlots, state.slots);
       for (let k = 0; k < span; k++) {
         const idx = slotIdx + k;
-        if (idx >= state.slots.length || state.slots[idx]?.isBreak || (!overrideMode && !courseAllowedSlotOn(course, idx, date))) {
-          setAutoFillReport("Cannot place course — the full session must fit only inside selected rule periods.");
+        if (
+          idx >= state.slots.length ||
+          state.slots[idx]?.isBreak ||
+          (!overrideMode && !courseAllowedSlotOn(course, idx, date))
+        ) {
+          setAutoFillReport(
+            "Cannot place course — the full session must fit only inside selected rule periods.",
+          );
           return;
         }
         const key = `${date}-${idx}`;
@@ -809,7 +893,9 @@ function Index() {
           return otherCourse ? sharesFaculty(otherCourse, course) : false;
         });
         if (facultyBusy && !overrideMode) {
-          setAutoFillReport("Cannot place course — this faculty is already assigned in another class at that time.");
+          setAutoFillReport(
+            "Cannot place course — this faculty is already assigned in another class at that time.",
+          );
           return;
         }
       }
@@ -881,7 +967,12 @@ function Index() {
       setAutoFillReport("Timetable is frozen — unfreeze to clear.");
       return;
     }
-    if (!confirm("Clear every course assignment from all classes? Breaks and blocked slots will stay.")) return;
+    if (
+      !confirm(
+        "Clear every course assignment from all classes? Breaks and blocked slots will stay.",
+      )
+    )
+      return;
     setState((s) => ({
       ...s,
       classes: s.classes.map((cls) => {
@@ -901,7 +992,12 @@ function Index() {
       return;
     }
     if (!activeClass) return;
-    if (!confirm(`Clear all course assignments from "${activeClass.name}"? Breaks and blocked slots will stay.`)) return;
+    if (
+      !confirm(
+        `Clear all course assignments from "${activeClass.name}"? Breaks and blocked slots will stay.`,
+      )
+    )
+      return;
     setState((s) => ({
       ...s,
       classes: s.classes.map((cls) => {
@@ -917,7 +1013,10 @@ function Index() {
   };
 
   const onCellMouseDown = (date: string, slotIdx: number, e: React.MouseEvent) => {
-    if (state.slots[slotIdx]?.isBreak) { e.preventDefault(); return; }
+    if (state.slots[slotIdx]?.isBreak) {
+      e.preventDefault();
+      return;
+    }
     // Alt + right-click erases immediately
     if (e.button === 2 && e.altKey) {
       e.preventDefault();
@@ -1041,7 +1140,11 @@ function Index() {
       const day = (d.getUTCDay() + 6) % 7; // Mon=0
       const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day + 3));
       const first = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
-      const wk = 1 + Math.round(((t.getTime() - first.getTime()) / 86400000 - 3 + ((first.getUTCDay() + 6) % 7)) / 7);
+      const wk =
+        1 +
+        Math.round(
+          ((t.getTime() - first.getTime()) / 86400000 - 3 + ((first.getUTCDay() + 6) % 7)) / 7,
+        );
       return `${t.getUTCFullYear()}-W${wk}`;
     };
 
@@ -1082,7 +1185,10 @@ function Index() {
             if (cell?.kind !== "course" || cell.courseId !== courseId) break;
             // Never remove frozen/locked placements — they are permanent
             // overrides and must survive Fill by Rules.
-            if (cell.locked) { idx++; continue; }
+            if (cell.locked) {
+              idx++;
+              continue;
+            }
             delete cls.grid[key];
             removed++;
             idx++;
@@ -1101,12 +1207,23 @@ function Index() {
                 if (prev?.kind === "course" && prev.courseId === cell.courseId) continue;
                 const course = cls.courses.find((c) => c.id === cell.courseId);
                 const span = course ? cleanDurationSlots(course.durationSlots, s.slots) : 1;
-                const hasFullSpan = Boolean(course) && Array.from({ length: span }, (_, i) => {
-                  const idx = slotIdx + i;
-                  const part = cls.grid[`${date}-${idx}`];
-                  return idx < s.slots.length && !s.slots[idx]?.isBreak && part?.kind === "course" && part.courseId === cell.courseId;
-                }).every(Boolean);
-                if (!course || !hasFullSpan || !courseSpanFitsRules(course, s.slots, date, slotIdx)) {
+                const hasFullSpan =
+                  Boolean(course) &&
+                  Array.from({ length: span }, (_, i) => {
+                    const idx = slotIdx + i;
+                    const part = cls.grid[`${date}-${idx}`];
+                    return (
+                      idx < s.slots.length &&
+                      !s.slots[idx]?.isBreak &&
+                      part?.kind === "course" &&
+                      part.courseId === cell.courseId
+                    );
+                  }).every(Boolean);
+                if (
+                  !course ||
+                  !hasFullSpan ||
+                  !courseSpanFitsRules(course, s.slots, date, slotIdx)
+                ) {
                   deleteCourseRun(cls, date, slotIdx, cell.courseId);
                 }
               }
@@ -1195,15 +1312,22 @@ function Index() {
           const key = `${date}-${idx}`;
           const existing = cls.grid[key];
           if (existing && existing.kind !== "empty") return false;
-          if (facultyBusy[key] && getFaculties(course).some((f) => facultyBusy[key].has(f))) return false;
+          if (facultyBusy[key] && getFaculties(course).some((f) => facultyBusy[key].has(f)))
+            return false;
         }
         return true;
       };
 
-      const unavailableReason = (cls: ClassData, course: Course, date: string, start: number): string => {
+      const unavailableReason = (
+        cls: ClassData,
+        course: Course,
+        date: string,
+        start: number,
+      ): string => {
         if (!courseAllowedOn(course, date)) return "outside course day/date rules";
         if (!startSlotsFor(course, date).includes(start)) return "period not selected in rules";
-        if (!spanFitsCourse(course, start, date)) return "span crosses a break or disallowed period";
+        if (!spanFitsCourse(course, start, date))
+          return "span crosses a break or disallowed period";
         for (let i = 0; i < cleanDurationSlots(course.durationSlots, s.slots); i++) {
           const idx = start + i;
           const key = `${date}-${idx}`;
@@ -1226,7 +1350,9 @@ function Index() {
                 return `${other.name}${busyCourse.name ? ` (${busyCourse.name})` : ""}`;
               })
               .filter((value): value is string => Boolean(value));
-            return busy.length > 0 ? `faculty busy in ${busy.join(", ")}` : "faculty busy in another class";
+            return busy.length > 0
+              ? `faculty busy in ${busy.join(", ")}`
+              : "faculty busy in another class";
           }
         }
         return "no open matching slot";
@@ -1260,21 +1386,28 @@ function Index() {
       };
 
       const tasks: AutoTask[] = [];
-      const addTask = (cls: ClassData, course: Course, dateList: string[], desiredSessions: number, label: string) => {
+      const addTask = (
+        cls: ClassData,
+        course: Course,
+        dateList: string[],
+        desiredSessions: number,
+        label: string,
+      ) => {
         const startsByDate: Record<string, number[]> = {};
         const dateOrder: Record<string, number> = {};
         let possibleStarts = 0;
         dateList.forEach((d, dateIdx) => {
           dateOrder[d] = dateIdx;
           if (!courseAllowedOn(course, d)) return;
-          const starts = startSlotsFor(course, d).filter((start) => spanFitsCourse(course, start, d));
+          const starts = startSlotsFor(course, d).filter((start) =>
+            spanFitsCourse(course, start, d),
+          );
           startsByDate[d] = starts;
           possibleStarts += starts.length;
         });
         if (opts.strictRules && possibleStarts > 0) {
-          desiredSessions = desiredSessions <= 0
-            ? possibleStarts
-            : Math.min(desiredSessions, possibleStarts);
+          desiredSessions =
+            desiredSessions <= 0 ? possibleStarts : Math.min(desiredSessions, possibleStarts);
         } else if (desiredSessions > 0 && possibleStarts > 0) {
           desiredSessions = Math.min(desiredSessions, possibleStarts);
         }
@@ -1341,12 +1474,19 @@ function Index() {
           const bSlack = bAvail - b.remaining;
           if (aSlack !== bSlack) return aSlack - bSlack;
           if (b.remaining !== a.remaining) return b.remaining - a.remaining;
-          const aRules = (a.course.allowedWeekdays?.length || 7) + Object.values(a.course.allowedSlotsByWeekday ?? {}).flat().length + (a.course.allowedSlots?.length || s.slots.length);
-          const bRules = (b.course.allowedWeekdays?.length || 7) + Object.values(b.course.allowedSlotsByWeekday ?? {}).flat().length + (b.course.allowedSlots?.length || s.slots.length);
+          const aRules =
+            (a.course.allowedWeekdays?.length || 7) +
+            Object.values(a.course.allowedSlotsByWeekday ?? {}).flat().length +
+            (a.course.allowedSlots?.length || s.slots.length);
+          const bRules =
+            (b.course.allowedWeekdays?.length || 7) +
+            Object.values(b.course.allowedSlotsByWeekday ?? {}).flat().length +
+            (b.course.allowedSlots?.length || s.slots.length);
           return aRules - bRules;
         });
 
-        let nextPlacement: { task: AutoTask; date: string; slot: number; score: number } | null = null;
+        let nextPlacement: { task: AutoTask; date: string; slot: number; score: number } | null =
+          null;
         for (const task of tasks) {
           if (task.remaining <= 0) continue;
           for (const [date, starts] of Object.entries(task.startsByDate)) {
@@ -1378,7 +1518,8 @@ function Index() {
                 });
                 return otherAvailability - blockedOptions < other.remaining ? risk + 1 : risk;
               }, 0);
-              const avoidableRisk = currentAvailability > task.remaining ? wouldBlockAnotherRequiredSlot : 0;
+              const avoidableRisk =
+                currentAvailability > task.remaining ? wouldBlockAnotherRequiredSlot : 0;
               // Global earliest-first selection: choose the nearest valid date/period
               // across every class/course before considering spread or course priority.
               // This prevents an open rule slot from being skipped while a later slot is used.
@@ -1446,13 +1587,17 @@ function Index() {
             if (cell?.kind !== "course") return;
             const course = cls.courses.find((c) => c.id === cell.courseId);
             if (!course) {
-              auditIssues.push(`${cls.name} ${date} ${periodLabelFor(slotIdx)} has an unknown course`);
+              auditIssues.push(
+                `${cls.name} ${date} ${periodLabelFor(slotIdx)} has an unknown course`,
+              );
               return;
             }
             const prev = slotIdx > 0 ? cls.grid[`${date}-${slotIdx - 1}`] : undefined;
             const isStart = !(prev?.kind === "course" && prev.courseId === cell.courseId);
             if (isStart && !courseSpanFitsRules(course, s.slots, date, slotIdx)) {
-              auditIssues.push(`${cls.name} ${course.name} violates rules at ${date} ${periodLabelFor(slotIdx)}`);
+              auditIssues.push(
+                `${cls.name} ${course.name} violates rules at ${date} ${periodLabelFor(slotIdx)}`,
+              );
             }
             getFaculties(course).forEach((f) => {
               const list = facultyAtSlot.get(f) ?? [];
@@ -1462,7 +1607,9 @@ function Index() {
           });
           facultyAtSlot.forEach((list, faculty) => {
             if (list.length > 1) {
-              auditIssues.push(`${faculty} overlaps at ${date} ${periodLabelFor(slotIdx)} (${list.join(", ")})`);
+              auditIssues.push(
+                `${faculty} overlaps at ${date} ${periodLabelFor(slotIdx)} (${list.join(", ")})`,
+              );
             }
           });
         });
@@ -1470,10 +1617,13 @@ function Index() {
 
       const visibleCourseCounts = classes.map((cls) => {
         const count = workingDates.reduce((sum, date) => {
-          return sum + s.slots.reduce((slotSum, _, slotIdx) => {
-            const cell = cls.grid[`${date}-${slotIdx}`];
-            return slotSum + (cell?.kind === "course" ? 1 : 0);
-          }, 0);
+          return (
+            sum +
+            s.slots.reduce((slotSum, _, slotIdx) => {
+              const cell = cls.grid[`${date}-${slotIdx}`];
+              return slotSum + (cell?.kind === "course" ? 1 : 0);
+            }, 0)
+          );
         }, 0);
         return { id: cls.id, name: cls.name, count };
       });
@@ -1483,7 +1633,11 @@ function Index() {
 
       // Diagnostic feedback stays on screen instead of blocking with popups.
       queueMicrotask(() => {
-        const mode = opts.strictRules ? "Fill by Rules" : opts.overwrite ? "Regenerate" : "Fill Empty";
+        const mode = opts.strictRules
+          ? "Fill by Rules"
+          : opts.overwrite
+            ? "Regenerate"
+            : "Fill Empty";
         if (firstVisibleClass && activeVisibleCount === 0) {
           setActiveClassId(firstVisibleClass.id);
           setPendingScrollClassId(firstVisibleClass.id);
@@ -1498,7 +1652,9 @@ function Index() {
             validDates === 0 ? "date range" : "",
             courseCount === 0 ? "courses" : "",
             nonBreakCount === 0 ? "non-break periods" : "",
-          ].filter(Boolean).join(", ");
+          ]
+            .filter(Boolean)
+            .join(", ");
           setAutoFillReport(`${mode}: nothing to place${reason ? ` — check ${reason}.` : "."}`);
         } else if (unmet.length > 0) {
           setAutoFillReport(
@@ -1510,10 +1666,12 @@ function Index() {
           );
         } else if (placedCount === 0) {
           if (firstVisibleClass) {
-            const showingCount = activeVisibleCount > 0 ? activeVisibleCount : firstVisibleClass.count;
-            const showingClass = activeVisibleCount > 0
-              ? visibleCourseCounts.find((item) => item.id === activeClassId)?.name
-              : firstVisibleClass.name;
+            const showingCount =
+              activeVisibleCount > 0 ? activeVisibleCount : firstVisibleClass.count;
+            const showingClass =
+              activeVisibleCount > 0
+                ? visibleCourseCounts.find((item) => item.id === activeClassId)?.name
+                : firstVisibleClass.name;
             setAutoFillReport(
               `${mode}: already filled and rules verified — showing ${showingCount} course slot${showingCount === 1 ? "" : "s"}${showingClass ? ` in ${showingClass}` : ""}.${safetyRemoved > 0 ? ` Removed ${safetyRemoved} unsafe old cell${safetyRemoved === 1 ? "" : "s"}.` : ""}`,
             );
@@ -1523,7 +1681,9 @@ function Index() {
             );
           }
         } else {
-          setAutoFillReport(`${mode}: placed ${placedCount} of ${totalTarget} planned sessions. Rules verified.${safetyRemoved > 0 ? ` Removed ${safetyRemoved} unsafe old cell${safetyRemoved === 1 ? "" : "s"}.` : ""}`);
+          setAutoFillReport(
+            `${mode}: placed ${placedCount} of ${totalTarget} planned sessions. Rules verified.${safetyRemoved > 0 ? ` Removed ${safetyRemoved} unsafe old cell${safetyRemoved === 1 ? "" : "s"}.` : ""}`,
+          );
         }
       });
 
@@ -1531,10 +1691,7 @@ function Index() {
     });
   };
 
-  const runAutoPopulate = (
-    label: string,
-    opts: { overwrite: boolean; strictRules?: boolean }
-  ) => {
+  const runAutoPopulate = (label: string, opts: { overwrite: boolean; strictRules?: boolean }) => {
     // When frozen we still allow auto-fill to run: locked cells are preserved
     // and only empty slots receive new placements.
     setAutoStatus({ label, phase: "Preparing…" });
@@ -1586,13 +1743,17 @@ function Index() {
     for (let i = 0; i < line.length; i++) {
       const ch = line[i];
       if (inQ) {
-        if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-        else if (ch === '"') inQ = false;
+        if (ch === '"' && line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else if (ch === '"') inQ = false;
         else cur += ch;
       } else {
         if (ch === '"') inQ = true;
-        else if (ch === ",") { out.push(cur); cur = ""; }
-        else cur += ch;
+        else if (ch === ",") {
+          out.push(cur);
+          cur = "";
+        } else cur += ch;
       }
     }
     out.push(cur);
@@ -1600,8 +1761,14 @@ function Index() {
   };
 
   const applyBlockCsv = (text: string) => {
-    const rawLines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
-    if (rawLines.length === 0) { setBlockReport("CSV is empty."); return; }
+    const rawLines = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith("#"));
+    if (rawLines.length === 0) {
+      setBlockReport("CSV is empty.");
+      return;
+    }
     const header = parseCsvRow(rawLines[0]).map((c) => c.toLowerCase());
     const dateIdx = header.indexOf("date");
     const periodsIdx = (() => {
@@ -1613,12 +1780,15 @@ function Index() {
       return i >= 0 ? i : header.indexOf("label");
     })();
     const scopeIdx = header.indexOf("scope");
-    if (dateIdx < 0) { setBlockReport("CSV missing required 'date' column."); return; }
+    if (dateIdx < 0) {
+      setBlockReport("CSV missing required 'date' column.");
+      return;
+    }
 
     const normalizeDate = (raw: string): string => {
       const s = (raw || "").trim();
       if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-      const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+      const m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
       if (!m) return "";
       const d = m[1].padStart(2, "0");
       const mo = m[2].padStart(2, "0");
@@ -1627,7 +1797,10 @@ function Index() {
       return `${y}-${mo}-${d}`;
     };
 
-    const nonBreakIdxs = state.slots.map((sl, i) => ({ sl, i })).filter((x) => !x.sl.isBreak).map((x) => x.i);
+    const nonBreakIdxs = state.slots
+      .map((sl, i) => ({ sl, i }))
+      .filter((x) => !x.sl.isBreak)
+      .map((x) => x.i);
     const parsePeriods = (str: string): number[] => {
       const s = (str || "all").trim().toLowerCase();
       if (!s || s === "all" || s === "*") return nonBreakIdxs;
@@ -1642,7 +1815,10 @@ function Index() {
       return [...nums].map((n) => nonBreakIdxs[n - 1]).filter((x): x is number => x !== undefined);
     };
 
-    let applied = 0, skipped = 0, outOfRange = 0, noPeriods = 0;
+    let applied = 0,
+      skipped = 0,
+      outOfRange = 0,
+      noPeriods = 0;
     const errors: string[] = [];
     setState((s) => {
       const inRange = new Set<string>();
@@ -1652,16 +1828,37 @@ function Index() {
       rawLines.slice(1).forEach((line, i) => {
         const cells = parseCsvRow(line);
         const date = normalizeDate(cells[dateIdx]);
-        if (!date) { errors.push(`Row ${i + 2}: bad date "${cells[dateIdx]}" (use DD/MM/YYYY)`); skipped++; return; }
+        if (!date) {
+          errors.push(`Row ${i + 2}: bad date "${cells[dateIdx]}" (use DD/MM/YYYY)`);
+          skipped++;
+          return;
+        }
         const periods = parsePeriods(periodsIdx >= 0 ? cells[periodsIdx] : "all");
-        if (periods.length === 0) { errors.push(`Row ${i + 2}: no valid periods parsed from "${cells[periodsIdx] ?? ""}"`); noPeriods++; skipped++; return; }
-        if (!inRange.has(date)) { errors.push(`Row ${i + 2}: date ${date} is outside timetable range ${s.fromDate}..${s.toDate}`); outOfRange++; skipped++; return; }
+        if (periods.length === 0) {
+          errors.push(`Row ${i + 2}: no valid periods parsed from "${cells[periodsIdx] ?? ""}"`);
+          noPeriods++;
+          skipped++;
+          return;
+        }
+        if (!inRange.has(date)) {
+          errors.push(
+            `Row ${i + 2}: date ${date} is outside timetable range ${s.fromDate}..${s.toDate}`,
+          );
+          outOfRange++;
+          skipped++;
+          return;
+        }
         const label = (labelIdx >= 0 ? cells[labelIdx] : "") || "Block";
         const scope = ((scopeIdx >= 0 ? cells[scopeIdx] : "") || "all").toLowerCase();
-        const targets = scope === "all" || scope === "*" || scope === ""
-          ? classes
-          : classes.filter((c) => c.name.toLowerCase() === scope);
-        if (targets.length === 0) { errors.push(`Row ${i + 2}: unknown scope "${cells[scopeIdx]}"`); skipped++; return; }
+        const targets =
+          scope === "all" || scope === "*" || scope === ""
+            ? classes
+            : classes.filter((c) => c.name.toLowerCase() === scope);
+        if (targets.length === 0) {
+          errors.push(`Row ${i + 2}: unknown scope "${cells[scopeIdx]}"`);
+          skipped++;
+          return;
+        }
         targets.forEach((cls) => {
           const clsRange = new Set(classDatesFor(cls, s));
           if (!clsRange.has(date)) return;
@@ -1674,7 +1871,10 @@ function Index() {
       return { ...s, classes };
     });
     const extras: string[] = [];
-    if (outOfRange) extras.push(`${outOfRange} row(s) outside timetable date range (extend From/To to include them).`);
+    if (outOfRange)
+      extras.push(
+        `${outOfRange} row(s) outside timetable date range (extend From/To to include them).`,
+      );
     if (noPeriods) extras.push(`${noPeriods} row(s) had no valid periods.`);
     const msg =
       `Applied ${applied} blocked cells.` +
@@ -1687,21 +1887,26 @@ function Index() {
   // Export
   const buildSheet = (cls: ClassData) => {
     const rows: string[][] = [];
-    rows.push(["Day / Date", ...state.slots.map(slotLabel)]);
+    rows.push(["Week", "Day / Date", ...state.slots.map(slotLabel)]);
     const clsDates = classDatesFor(cls, state);
     clsDates.forEach((date) => {
       const { weekday, date: dstr } = dayLabel(date);
-      const row = [`${weekday} ${dstr}`];
+      const weekIndex = weekIndexForDate(cls, state, date);
+      const row = [`W${weekIndex}`, `${weekday} ${dstr}`];
       state.slots.forEach((sl, i) => {
-        if (sl.isBreak) { row.push("Break"); return; }
+        if (sl.isBreak) {
+          row.push("Break");
+          return;
+        }
         const cell = cls.grid[`${date}-${i}`];
         if (!cell) row.push("");
         else if (cell.kind === "break") row.push(`Break: ${cell.label}`);
         else if (cell.kind === "blocked") row.push(`Blocked: ${cell.label}`);
         else if (cell.kind === "course") {
           const c = cls.courses.find((x) => x.id === cell.courseId);
-          if (!c) { row.push(""); }
-          else {
+          if (!c) {
+            row.push("");
+          } else {
             const P = Math.max(0, c.practicalHours ?? 0);
             const LT = Math.max(0, c.lectureHours ?? 0) + Math.max(0, c.tutorialHours ?? 0);
             const isPractical = P > 0 && (LT === 0 || (c.durationSlots ?? 1) >= 2);
@@ -1716,7 +1921,8 @@ function Index() {
   };
   const exportExcel = () => {
     const wb = XLSXStyle.utils.book_new();
-    const hexClean = (h: string) => (h || "").replace("#", "").padStart(6, "0").slice(-6).toUpperCase();
+    const hexClean = (h: string) =>
+      (h || "").replace("#", "").padStart(6, "0").slice(-6).toUpperCase();
     const textColorFor = (hex: string) => {
       const h = hexClean(hex);
       const r = parseInt(h.slice(0, 2), 16);
@@ -1732,7 +1938,9 @@ function Index() {
       const clsDates = classDatesFor(cls, state);
       const ws = XLSXStyle.utils.aoa_to_sheet(data);
       const numCols = data[0].length;
-      ws["!cols"] = Array.from({ length: numCols }, (_, i) => ({ wch: i === 0 ? 18 : 20 }));
+      ws["!cols"] = Array.from({ length: numCols }, (_, i) => ({
+        wch: i === 0 ? 8 : i === 1 ? 18 : 20,
+      }));
       ws["!rows"] = data.map((_, i) => ({ hpt: i === 0 ? 24 : 32 }));
       for (let r = 0; r < data.length; r++) {
         for (let c = 0; c < numCols; c++) {
@@ -1743,12 +1951,12 @@ function Index() {
             border: baseBorders,
             font: { name: "Calibri", sz: 11 },
           };
-          if (r === 0 || c === 0) {
+          if (r === 0 || c === 0 || c === 1) {
             cellStyle.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } };
             cellStyle.fill = { patternType: "solid", fgColor: { rgb: "0D0D0D" } };
           } else {
             const date = clsDates[r - 1];
-            const slotIdx = c - 1;
+            const slotIdx = c - 2;
             const key = `${date}-${slotIdx}`;
             const isConflict = conflicts.has(`${cls.id}:${key}`);
             const sl = state.slots[slotIdx];
@@ -1766,13 +1974,18 @@ function Index() {
               const course = cls.courses.find((x) => x.id === cell.courseId);
               const bg = hexClean(course?.color ?? "#DDDDDD");
               cellStyle.fill = { patternType: "solid", fgColor: { rgb: bg } };
-              cellStyle.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: textColorFor(bg) } };
+              cellStyle.font = {
+                name: "Calibri",
+                sz: 11,
+                bold: true,
+                color: { rgb: textColorFor(bg) },
+              };
             }
           }
           (ws[addr] as { s?: unknown }).s = cellStyle;
         }
       }
-      ws["!freeze"] = { xSplit: 1, ySplit: 1 };
+      ws["!freeze"] = { xSplit: 2, ySplit: 1 };
       XLSXStyle.utils.book_append_sheet(wb, ws, cls.name.slice(0, 31) || "Class");
     });
     XLSXStyle.writeFile(wb, `timetable_${state.fromDate}_to_${state.toDate}.xlsx`);
@@ -1840,19 +2053,27 @@ function Index() {
         });
         if (placedPeriodsByWeek.size === 0) return;
 
-        const totalPlacedPeriods = Array.from(placedPeriodsByWeek.values()).reduce((sum, value) => sum + value, 0);
+        const totalPlacedPeriods = Array.from(placedPeriodsByWeek.values()).reduce(
+          (sum, value) => sum + value,
+          0,
+        );
         const theoryUnits = Math.max(0, (course.lectureHours ?? 0) + (course.tutorialHours ?? 0));
         const practicalUnits = Math.max(0, course.practicalHours ?? 0);
         const totalLtpUnits = theoryUnits + practicalUnits;
-        const desiredTheoryPeriods = totalLtpUnits > 0
-          ? Math.min(totalPlacedPeriods, Math.round((totalPlacedPeriods * theoryUnits) / totalLtpUnits))
-          : totalPlacedPeriods;
+        const desiredTheoryPeriods =
+          totalLtpUnits > 0
+            ? Math.min(
+                totalPlacedPeriods,
+                Math.round((totalPlacedPeriods * theoryUnits) / totalLtpUnits),
+              )
+            : totalPlacedPeriods;
 
         const weekEntries = Array.from(placedPeriodsByWeek.entries()).sort(([a], [b]) => a - b);
         const theoryByWeek = new Map<number, number>();
         if (desiredTheoryPeriods > 0) {
           const weighted = weekEntries.map(([cycle, periods]) => {
-            const exact = totalPlacedPeriods > 0 ? (periods * desiredTheoryPeriods) / totalPlacedPeriods : 0;
+            const exact =
+              totalPlacedPeriods > 0 ? (periods * desiredTheoryPeriods) / totalPlacedPeriods : 0;
             const base = Math.min(periods, Math.floor(exact));
             return { cycle, periods, base, fraction: exact - base };
           });
@@ -1896,8 +2117,17 @@ function Index() {
       });
       const ws = XLSX.utils.aoa_to_sheet(rows);
       ws["!cols"] = [
-        { wch: 22 }, { wch: 10 }, { wch: 14 }, { wch: 14 },
-        { wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 22 }, { wch: 8 }, { wch: 10 }, { wch: 10 },
+        { wch: 22 },
+        { wch: 10 },
+        { wch: 14 },
+        { wch: 14 },
+        { wch: 32 },
+        { wch: 8 },
+        { wch: 14 },
+        { wch: 22 },
+        { wch: 8 },
+        { wch: 10 },
+        { wch: 10 },
       ];
       const sheetName = `Data to Fill ${cls.name}`.slice(0, 31);
       XLSX.utils.book_append_sheet(wb, ws, sheetName);
@@ -1937,7 +2167,9 @@ function Index() {
       const normalized = normalizeStateSnapshot(loaded);
       setState(normalized);
       setActiveClassId(normalized.classes[0]?.id ?? "");
-      setAutoFillReport("Loaded .aadhi file. Course span values above the available periods were corrected to 1.");
+      setAutoFillReport(
+        "Loaded .aadhi file. Course span values above the available periods were corrected to 1.",
+      );
     } catch {
       alert("Could not read this .aadhi file.");
     }
@@ -1974,7 +2206,11 @@ function Index() {
 
       setAdminRefs((prev) => [
         ...prev,
-        { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: file.name, state: normalized },
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name: file.name,
+          state: normalized,
+        },
       ]);
 
       if (uniqueClasses.length > 0) {
@@ -1982,7 +2218,9 @@ function Index() {
       }
 
       setWarningsPanelOpen(true);
-      setAutoFillReport(`Imported ${uniqueClasses.length} class(es) from "${file.name}" as active classes. Check warnings panel for overlaps.`);
+      setAutoFillReport(
+        `Imported ${uniqueClasses.length} class(es) from "${file.name}" as active classes. Check warnings panel for overlaps.`,
+      );
     } catch {
       alert(`Could not read "${file.name}".`);
     }
@@ -2007,7 +2245,12 @@ function Index() {
           if (!course) return;
           getFaculties(course).forEach((faculty) => {
             const list = byKey.get(key) ?? [];
-            list.push({ origin, className: cls.name, courseName: course.name || course.id, faculty });
+            list.push({
+              origin,
+              className: cls.name,
+              courseName: course.name || course.id,
+              faculty,
+            });
             byKey.set(key, list);
           });
         });
@@ -2054,10 +2297,13 @@ function Index() {
   const activeVisibleCourseSlots = useMemo(() => {
     if (!activeClass) return 0;
     return dates.reduce((sum, date) => {
-      return sum + state.slots.reduce((slotSum, _, slotIdx) => {
-        const cell = activeClass.grid[`${date}-${slotIdx}`];
-        return slotSum + (cell?.kind === "course" ? 1 : 0);
-      }, 0);
+      return (
+        sum +
+        state.slots.reduce((slotSum, _, slotIdx) => {
+          const cell = activeClass.grid[`${date}-${slotIdx}`];
+          return slotSum + (cell?.kind === "course" ? 1 : 0);
+        }, 0)
+      );
     }, 0);
   }, [activeClass, dates, state.slots]);
 
@@ -2071,7 +2317,11 @@ function Index() {
       const day = (d.getUTCDay() + 6) % 7;
       const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day + 3));
       const first = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
-      const wk = 1 + Math.round(((t.getTime() - first.getTime()) / 86400000 - 3 + ((first.getUTCDay() + 6) % 7)) / 7);
+      const wk =
+        1 +
+        Math.round(
+          ((t.getTime() - first.getTime()) / 86400000 - 3 + ((first.getUTCDay() + 6) % 7)) / 7,
+        );
       return `${t.getUTCFullYear()}-W${wk}`;
     };
     const countPlaced = (cls: ClassData) => {
@@ -2120,7 +2370,7 @@ function Index() {
     return map;
   }, [activeClass, dates, state.slots]);
 
-  const handleWarningClick = (warning: typeof conflictDetailsList[0]) => {
+  const handleWarningClick = (warning: (typeof conflictDetailsList)[0]) => {
     setActiveClassId(warning.classId);
     setPendingScroll({
       classId: warning.classId,
@@ -2141,31 +2391,34 @@ function Index() {
         if (armedTool?.kind === "course") setCursorPos({ x: e.clientX, y: e.clientY });
       }}
     >
-      {armedTool?.kind === "course" && cursorPos && activeClass && (() => {
-        const course = activeClass.courses.find((c) => c.id === armedTool.courseId);
-        if (!course) return null;
-        const clsState = stateForClass(activeClass, state);
-        const total = courseTotalTarget(course, courseSemesterWeeks(course, clsState));
-        const placed = coursePlacementCounts.get(course.id) ?? 0;
-        const remaining = Math.max(0, total - placed);
-        return (
-          <div
-            className="pointer-events-none fixed z-[9999] flex items-center gap-2 border-2 border-[#0d0d0d] bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-wider shadow-lg"
-            style={{ left: cursorPos.x + 16, top: cursorPos.y + 16 }}
-          >
-            <span
-              className="inline-block h-2.5 w-2.5 border border-[#0d0d0d]"
-              style={{ backgroundColor: course.color }}
-            />
-            <span>{course.name}</span>
-            <span className="text-[#0d0d0d]/60">·</span>
-            <span className={remaining === 0 ? "text-emerald-700" : "text-red-700"}>
-              {remaining} left
-            </span>
-            <span className="text-[#0d0d0d]/60">/ {total}</span>
-          </div>
-        );
-      })()}
+      {armedTool?.kind === "course" &&
+        cursorPos &&
+        activeClass &&
+        (() => {
+          const course = activeClass.courses.find((c) => c.id === armedTool.courseId);
+          if (!course) return null;
+          const clsState = stateForClass(activeClass, state);
+          const total = courseTotalTarget(course, courseSemesterWeeks(course, clsState));
+          const placed = coursePlacementCounts.get(course.id) ?? 0;
+          const remaining = Math.max(0, total - placed);
+          return (
+            <div
+              className="pointer-events-none fixed z-[9999] flex items-center gap-2 border-2 border-[#0d0d0d] bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-wider shadow-lg"
+              style={{ left: cursorPos.x + 16, top: cursorPos.y + 16 }}
+            >
+              <span
+                className="inline-block h-2.5 w-2.5 border border-[#0d0d0d]"
+                style={{ backgroundColor: course.color }}
+              />
+              <span>{course.name}</span>
+              <span className="text-[#0d0d0d]/60">·</span>
+              <span className={remaining === 0 ? "text-emerald-700" : "text-red-700"}>
+                {remaining} left
+              </span>
+              <span className="text-[#0d0d0d]/60">/ {total}</span>
+            </div>
+          );
+        })()}
       <div className="mx-auto flex min-h-screen w-full max-w-[1500px] flex-col md:flex-row md:border-x-2 md:border-[#0d0d0d]">
         {/* Sidebar */}
         <aside className="w-full shrink-0 border-b-2 border-[#0d0d0d] bg-[#e8e4dd] md:w-[320px] md:border-b-0 md:border-r-2">
@@ -2258,10 +2511,7 @@ function Index() {
                         (c.disabled ? "opacity-60" : "")
                       }
                     >
-                      <span
-                        className="h-3 w-3 shrink-0"
-                        style={{ backgroundColor: c.color }}
-                      />
+                      <span className="h-3 w-3 shrink-0" style={{ backgroundColor: c.color }} />
                       <input
                         value={c.name}
                         onChange={(e) => updateCourse(c.id, { name: e.target.value })}
@@ -2316,12 +2566,14 @@ function Index() {
                       />
                     </div>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
-                      {([
-                        ["lectureHours", "L", "Lecture hours per week"],
-                        ["tutorialHours", "T", "Tutorial hours per week"],
-                        ["practicalHours", "P", "Practical sessions per week"],
-                        ["credits", "C", "Credits (informational)"],
-                      ] as [keyof Course, string, string][]).map(([field, label, tip]) => (
+                      {(
+                        [
+                          ["lectureHours", "L", "Lecture hours per week"],
+                          ["tutorialHours", "T", "Tutorial hours per week"],
+                          ["practicalHours", "P", "Practical sessions per week"],
+                          ["credits", "C", "Credits (informational)"],
+                        ] as [keyof Course, string, string][]
+                      ).map(([field, label, tip]) => (
                         <label
                           key={field as string}
                           title={tip}
@@ -2335,7 +2587,9 @@ function Index() {
                             value={(c[field] as number | undefined) ?? 0}
                             onChange={(e) => {
                               const n = Math.max(0, parseInt(e.target.value || "0", 10));
-                              updateCourse(c.id, { [field]: n > 0 ? n : undefined } as Partial<Course>);
+                              updateCourse(c.id, {
+                                [field]: n > 0 ? n : undefined,
+                              } as Partial<Course>);
                             }}
                             className="w-10 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
                           />
@@ -2364,7 +2618,8 @@ function Index() {
                         className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
-                        {((c.lectureHours ?? 0) + (c.tutorialHours ?? 0) + (c.practicalHours ?? 0)) > 0 ? (
+                        {(c.lectureHours ?? 0) + (c.tutorialHours ?? 0) + (c.practicalHours ?? 0) >
+                        0 ? (
                           <span className="rounded bg-[#0d0d0d]/5 px-1.5 py-0.5 text-xs">
                             {courseWeeklyTarget(c)}
                           </span>
@@ -2404,11 +2659,14 @@ function Index() {
                     {/* Placed progress row */}
                     <div className="px-3 pb-2">
                       {(() => {
-                         const placed = coursePlacementCounts.get(c.id) ?? 0;
-                         const target = courseTotalTarget(
-                           c,
-                           courseSemesterWeeks(c, activeClass ? stateForClass(activeClass, state) : state),
-                         );
+                        const placed = coursePlacementCounts.get(c.id) ?? 0;
+                        const target = courseTotalTarget(
+                          c,
+                          courseSemesterWeeks(
+                            c,
+                            activeClass ? stateForClass(activeClass, state) : state,
+                          ),
+                        );
                         const pct =
                           target > 0 ? Math.min(100, Math.round((placed / target) * 100)) : 0;
                         const done = target > 0 && placed >= target;
@@ -2575,9 +2833,7 @@ function Index() {
                         />
                         <span>
                           {slotLabel(slot)}
-                          {slot.isBreak && (
-                            <span className="ml-1 text-[#b45309]">·break</span>
-                          )}
+                          {slot.isBreak && <span className="ml-1 text-[#b45309]">·break</span>}
                         </span>
                       </label>
                     );
@@ -2629,19 +2885,20 @@ function Index() {
                 Auto-fill & Blocker
               </h3>
               <p className="mb-3 text-[11px] text-[#2d2d2d]/70">
-                Auto-fill packs each course into the week using its rules. If <b>/wk</b> is 0,
-                Fill by Rules uses every allowed weekday and period opportunity.
+                Auto-fill packs each course into the week using its rules. If <b>/wk</b> is 0, Fill
+                by Rules uses every allowed weekday and period opportunity.
               </p>
               <div className="mb-3 grid grid-cols-2 gap-1">
-                 <button
-                   onClick={() => runAutoPopulate("Fill Empty", { overwrite: false })}
+                <button
+                  onClick={() => runAutoPopulate("Fill Empty", { overwrite: false })}
                   className="border-2 border-[#0d0d0d] bg-white px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
                 >
                   Fill Empty
                 </button>
                 <button
                   onClick={() => {
-                    if (confirm("Clear all courses and re-generate?")) runAutoPopulate("Regenerate", { overwrite: true });
+                    if (confirm("Clear all courses and re-generate?"))
+                      runAutoPopulate("Regenerate", { overwrite: true });
                   }}
                   className="border-2 border-[#0d0d0d] bg-[#0d0d0d] px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#f5f3ee] hover:opacity-90"
                 >
@@ -2650,7 +2907,9 @@ function Index() {
               </div>
               <div className="mb-3 grid grid-cols-2 gap-1">
                 <button
-                   onClick={() => runAutoPopulate("Fill by Rules", { overwrite: false, strictRules: true })}
+                  onClick={() =>
+                    runAutoPopulate("Fill by Rules", { overwrite: false, strictRules: true })
+                  }
                   className="border-2 border-[#0d0d0d] bg-amber-200 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-amber-300"
                   title="Places courses in their rule periods. If /wk is 0, uses every allowed period opportunity."
                 >
@@ -2659,7 +2918,7 @@ function Index() {
                 <button
                   onClick={() => {
                     if (confirm("Clear all courses and fill only by course rules?")) {
-                       runAutoPopulate("Regen Rules", { overwrite: true, strictRules: true });
+                      runAutoPopulate("Regen Rules", { overwrite: true, strictRules: true });
                     }
                   }}
                   className="border-2 border-[#0d0d0d] bg-amber-300 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-amber-400"
@@ -2704,7 +2963,10 @@ function Index() {
                   </label>
                   <button
                     onClick={() => {
-                      if (!pendingBlockCsv) { setBlockReport("Upload a CSV first."); return; }
+                      if (!pendingBlockCsv) {
+                        setBlockReport("Upload a CSV first.");
+                        return;
+                      }
                       applyBlockCsv(pendingBlockCsv.text);
                     }}
                     disabled={!pendingBlockCsv}
@@ -2714,7 +2976,10 @@ function Index() {
                   </button>
                   {pendingBlockCsv && (
                     <button
-                      onClick={() => { setPendingBlockCsv(null); setBlockReport(""); }}
+                      onClick={() => {
+                        setPendingBlockCsv(null);
+                        setBlockReport("");
+                      }}
                       className="border border-[#0d0d0d]/60 bg-white px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
                     >
                       Clear
@@ -2727,7 +2992,9 @@ function Index() {
                   </p>
                 )}
                 {blockReport && (
-                  <p className="mt-2 whitespace-pre-wrap text-[10px] text-[#2d2d2d]/80">{blockReport}</p>
+                  <p className="mt-2 whitespace-pre-wrap text-[10px] text-[#2d2d2d]/80">
+                    {blockReport}
+                  </p>
                 )}
                 <p className="mt-2 text-[10px] text-[#2d2d2d]/60">
                   Columns: <code>date, Reason, Session</code>. Date is <code>DD/MM/YYYY</code>.
@@ -2954,7 +3221,8 @@ function Index() {
               className="text-[11px] text-[#2d2d2d]/60"
               style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
             >
-              {dates.length} day{dates.length === 1 ? "" : "s"} · {state.slots.length} slots · {activeVisibleCourseSlots} filled
+              {dates.length} day{dates.length === 1 ? "" : "s"} · {state.slots.length} slots ·{" "}
+              {activeVisibleCourseSlots} filled
             </span>
             <span className="text-[#2d2d2d]/20">·</span>
             <span
@@ -2970,7 +3238,8 @@ function Index() {
                 }
                 title="This class · placed / planned (remaining)"
               >
-                {activeClass?.name ?? "Class"}: {sessionStats.activePlaced}/{sessionStats.activePlanned}
+                {activeClass?.name ?? "Class"}: {sessionStats.activePlaced}/
+                {sessionStats.activePlanned}
                 <span className="ml-1 text-[#2d2d2d]/60">
                   · {sessionStats.activeRemaining} left
                 </span>
@@ -2985,9 +3254,7 @@ function Index() {
                 title="All classes · placed / planned (remaining)"
               >
                 All: {sessionStats.totalPlaced}/{sessionStats.totalPlanned}
-                <span className="ml-1 text-[#2d2d2d]/60">
-                  · {sessionStats.totalRemaining} left
-                </span>
+                <span className="ml-1 text-[#2d2d2d]/60">· {sessionStats.totalRemaining} left</span>
               </span>
             </span>
             {armedTool && (
@@ -3001,11 +3268,13 @@ function Index() {
                       className="inline-block h-3 w-3"
                       style={{
                         backgroundColor:
-                          (activeClass?.courses ?? []).find((c) => c.id === armedTool.courseId)?.color ?? "#ddd",
+                          (activeClass?.courses ?? []).find((c) => c.id === armedTool.courseId)
+                            ?.color ?? "#ddd",
                       }}
                     />
                     <span className="font-bold">
-                      {(activeClass?.courses ?? []).find((c) => c.id === armedTool.courseId)?.name ?? "?"}
+                      {(activeClass?.courses ?? []).find((c) => c.id === armedTool.courseId)
+                        ?.name ?? "?"}
                     </span>
                   </span>
                 ) : (
@@ -3031,9 +3300,18 @@ function Index() {
               >
                 <span className="flex items-center gap-2">
                   <span className="text-sm">⚠️</span>
-                  <span>Faculty Overlaps / Rule Violations — <b>{conflictDetailsList.length} warning{conflictDetailsList.length === 1 ? "" : "s"}</b> detected. Click to view list and locate conflicts.</span>
+                  <span>
+                    Faculty Overlaps / Rule Violations —{" "}
+                    <b>
+                      {conflictDetailsList.length} warning
+                      {conflictDetailsList.length === 1 ? "" : "s"}
+                    </b>{" "}
+                    detected. Click to view list and locate conflicts.
+                  </span>
                 </span>
-                <span className="underline text-[10px] font-bold uppercase tracking-wider bg-white border border-red-600 px-2 py-0.5 text-red-700 shadow-[1px_1px_0_#dc2626] transition hover:bg-red-50">Open Panel</span>
+                <span className="underline text-[10px] font-bold uppercase tracking-wider bg-white border border-red-600 px-2 py-0.5 text-red-700 shadow-[1px_1px_0_#dc2626] transition hover:bg-red-50">
+                  Open Panel
+                </span>
               </button>
             )}
             {dates.length === 0 && (
@@ -3042,7 +3320,8 @@ function Index() {
               </div>
             )}
             <p className="text-[11px] text-[#2d2d2d]/60">
-              Click any cell to pick a course. Click-drag to paint. Right-click to change tool. Alt+right-click to erase.
+              Click any cell to pick a course. Click-drag to paint. Right-click to change tool.
+              Alt+right-click to erase.
             </p>
           </div>
 
@@ -3053,7 +3332,13 @@ function Index() {
                 <thead>
                   <tr className="bg-[#0d0d0d] text-[#f5f3ee]">
                     <th
-                      className="sticky left-0 z-10 w-32 border border-[#f5f3ee]/20 bg-[#0d0d0d] p-3 text-[10px] font-bold uppercase tracking-widest"
+                      className="sticky left-0 z-10 w-16 border border-[#f5f3ee]/20 bg-[#0d0d0d] p-3 text-[10px] font-bold uppercase tracking-widest text-center"
+                      style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                    >
+                      Week
+                    </th>
+                    <th
+                      className="sticky left-16 z-10 w-32 border border-[#f5f3ee]/20 bg-[#0d0d0d] p-3 text-[10px] font-bold uppercase tracking-widest"
                       style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
                     >
                       Day
@@ -3083,20 +3368,27 @@ function Index() {
                   {dates.map((date) => {
                     const { weekday, date: dstr } = dayLabel(date);
                     const rowHasCourse = activeClass
-                      ? state.slots.some((_, slotIdx) => activeClass.grid[`${date}-${slotIdx}`]?.kind === "course")
+                      ? state.slots.some(
+                          (_, slotIdx) => activeClass.grid[`${date}-${slotIdx}`]?.kind === "course",
+                        )
                       : false;
+                    const weekIndex = activeClass ? weekIndexForDate(activeClass, state, date) : 1;
                     return (
                       <tr key={date} data-filled-row={rowHasCourse ? "true" : undefined}>
+                        <td
+                          className="sticky left-0 z-10 border-2 border-[#0d0d0d] bg-[#e8e4dd] p-3 text-center align-middle font-bold text-xs w-16"
+                          style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                        >
+                          W{weekIndex}
+                        </td>
                         <th
-                          className="sticky left-0 z-10 border-2 border-[#0d0d0d] bg-[#e8e4dd] p-3 text-left align-middle"
+                          className="sticky left-16 z-10 border-2 border-[#0d0d0d] bg-[#e8e4dd] p-3 text-left align-middle w-32"
                           style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
                         >
                           <div className="text-xs font-bold uppercase tracking-wider">
                             {weekday}
                           </div>
-                          <div className="text-[10px] font-medium text-[#2d2d2d]/60">
-                            {dstr}
-                          </div>
+                          <div className="text-[10px] font-medium text-[#2d2d2d]/60">{dstr}</div>
                         </th>
                         {state.slots.map((sl, i) => {
                           if (!activeClass) return null;
@@ -3232,11 +3524,7 @@ function Index() {
               </div>
               <span className="mx-1 h-6 w-px bg-[#0d0d0d]/20" />
               <button
-                onClick={() =>
-                  setArmedTool(
-                    armedTool?.kind === "erase" ? null : { kind: "erase" },
-                  )
-                }
+                onClick={() => setArmedTool(armedTool?.kind === "erase" ? null : { kind: "erase" })}
                 className={
                   "border-2 px-2 py-1 text-[11px] font-bold uppercase tracking-wider transition " +
                   (armedTool?.kind === "erase"
@@ -3248,11 +3536,7 @@ function Index() {
                 Eraser
               </button>
               <button
-                onClick={() =>
-                  setArmedTool(
-                    armedTool?.kind === "break" ? null : { kind: "break" },
-                  )
-                }
+                onClick={() => setArmedTool(armedTool?.kind === "break" ? null : { kind: "break" })}
                 className={
                   "border-2 px-2 py-1 text-[11px] font-bold uppercase tracking-wider transition " +
                   (armedTool?.kind === "break"
@@ -3264,9 +3548,7 @@ function Index() {
               </button>
               <button
                 onClick={() =>
-                  setArmedTool(
-                    armedTool?.kind === "blocked" ? null : { kind: "blocked" },
-                  )
+                  setArmedTool(armedTool?.kind === "blocked" ? null : { kind: "blocked" })
                 }
                 className={
                   "border-2 px-2 py-1 text-[11px] font-bold uppercase tracking-wider transition " +
@@ -3312,7 +3594,12 @@ function Index() {
               <button
                 onClick={() => {
                   if (!state.frozen) {
-                    if (!confirm("Freeze the timetable? This locks all cells, hides conflict warnings, and makes overrides permanent. You can unfreeze later.")) return;
+                    if (
+                      !confirm(
+                        "Freeze the timetable? This locks all cells, hides conflict warnings, and makes overrides permanent. You can unfreeze later.",
+                      )
+                    )
+                      return;
                   }
                   setState((s) => {
                     const nextFrozen = !s.frozen;
@@ -3394,9 +3681,17 @@ function Index() {
                   // Count placed sessions of this course in the current date range
                   let placedForCourse = 0;
                   if (activeClass) {
-                    placedForCourse = countCourseSessionsInDates(activeClass.grid, c, state.slots, dates);
+                    placedForCourse = countCourseSessionsInDates(
+                      activeClass.grid,
+                      c,
+                      state.slots,
+                      dates,
+                    );
                   }
-                  const dateRange = c.fromDate || c.toDate ? `${c.fromDate ?? "start"} → ${c.toDate ?? "end"}` : null;
+                  const dateRange =
+                    c.fromDate || c.toDate
+                      ? `${c.fromDate ?? "start"} → ${c.toDate ?? "end"}`
+                      : null;
                   const ruleLabel =
                     dateRange ||
                     (c.allowedWeekdays && c.allowedWeekdays.length > 0) ||
@@ -3407,9 +3702,7 @@ function Index() {
                               ? c.allowedWeekdays.map((w) => WEEKDAY_FULL[w]).join(",")
                               : "any day"),
                           c.allowedSlots && c.allowedSlots.length > 0
-                            ? c.allowedSlots
-                                .map((i) => `P${periodNumberFor(i)}`)
-                                .join(",")
+                            ? c.allowedSlots.map((i) => `P${periodNumberFor(i)}`).join(",")
                             : "any period",
                         ].join(" · ")
                       : null;
@@ -3444,7 +3737,10 @@ function Index() {
                           {(() => {
                             const t = courseTotalTarget(
                               c,
-                              courseSemesterWeeks(c, activeClass ? stateForClass(activeClass, state) : state),
+                              courseSemesterWeeks(
+                                c,
+                                activeClass ? stateForClass(activeClass, state) : state,
+                              ),
                             );
                             return t > 0
                               ? `${placedForCourse} / ${t} sessions`
@@ -3491,310 +3787,314 @@ function Index() {
       )}
 
       {/* Rules editor modal */}
-      {rulesFor && activeClass && (() => {
-        const course = activeClass.courses.find((c) => c.id === rulesFor);
-        if (!course) return null;
-        const wdRule = course.allowedWeekdays ?? [];
-        const wdAll = wdRule.length === 0;
-        const slotRule = course.allowedSlots ?? [];
-        const slotAll = slotRule.length === 0;
-        const nonBreakIdxs = state.slots
-          .map((sl, i) => ({ sl, i }))
-          .filter((x) => !x.sl.isBreak);
-        return (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-[#0d0d0d]/60 p-4"
-            onClick={() => setRulesFor(null)}
-          >
+      {rulesFor &&
+        activeClass &&
+        (() => {
+          const course = activeClass.courses.find((c) => c.id === rulesFor);
+          if (!course) return null;
+          const wdRule = course.allowedWeekdays ?? [];
+          const wdAll = wdRule.length === 0;
+          const slotRule = course.allowedSlots ?? [];
+          const slotAll = slotRule.length === 0;
+          const nonBreakIdxs = state.slots.map((sl, i) => ({ sl, i })).filter((x) => !x.sl.isBreak);
+          return (
             <div
-              className="w-full max-w-md border-2 border-[#0d0d0d] bg-[#f5f3ee]"
-              onClick={(e) => e.stopPropagation()}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-[#0d0d0d]/60 p-4"
+              onClick={() => setRulesFor(null)}
             >
-              <div className="flex items-start justify-between border-b-2 border-[#0d0d0d] bg-[#0d0d0d] px-4 py-3 text-[#f5f3ee]">
-                <div className="min-w-0">
-                  <div className="text-[10px] uppercase tracking-widest text-[#f5f3ee]/60">
-                    Course rules · {activeClass.name}
+              <div
+                className="w-full max-w-md border-2 border-[#0d0d0d] bg-[#f5f3ee]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-start justify-between border-b-2 border-[#0d0d0d] bg-[#0d0d0d] px-4 py-3 text-[#f5f3ee]">
+                  <div className="min-w-0">
+                    <div className="text-[10px] uppercase tracking-widest text-[#f5f3ee]/60">
+                      Course rules · {activeClass.name}
+                    </div>
+                    <div
+                      className="truncate text-base font-bold"
+                      style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                    >
+                      {course.name}{" "}
+                      <span className="text-xs font-normal text-[#f5f3ee]/60">
+                        · {course.faculty}
+                      </span>
+                    </div>
                   </div>
-                  <div
-                    className="truncate text-base font-bold"
-                    style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                  <button
+                    onClick={() => setRulesFor(null)}
+                    className="text-lg leading-none text-[#f5f3ee]/60 hover:text-[#f5f3ee]"
+                    aria-label="Close"
                   >
-                    {course.name}{" "}
-                    <span className="text-xs font-normal text-[#f5f3ee]/60">
-                      · {course.faculty}
-                    </span>
-                  </div>
+                    ×
+                  </button>
                 </div>
-                <button
-                  onClick={() => setRulesFor(null)}
-                  className="text-lg leading-none text-[#f5f3ee]/60 hover:text-[#f5f3ee]"
-                  aria-label="Close"
-                >
-                  ×
-                </button>
-              </div>
-              <div className="max-h-[70vh] overflow-y-auto p-4 space-y-4">
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
-                      Active date range
-                    </span>
-                    <button
-                      onClick={() => updateCourse(course.id, { fromDate: undefined, toDate: undefined })}
-                      className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
-                    >
-                      All dates
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60">
-                      <span>From</span>
-                      <input
-                        type="date"
-                        value={course.fromDate ?? ""}
-                        onChange={(e) => updateCourse(course.id, { fromDate: e.target.value || undefined })}
-                        className="border border-[#0d0d0d]/20 bg-white px-2 py-1 text-xs outline-none focus:border-[#0d0d0d]"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60">
-                      <span>To</span>
-                      <input
-                        type="date"
-                        value={course.toDate ?? ""}
-                        onChange={(e) => updateCourse(course.id, { toDate: e.target.value || undefined })}
-                        className="border border-[#0d0d0d]/20 bg-white px-2 py-1 text-xs outline-none focus:border-[#0d0d0d]"
-                      />
-                    </label>
-                  </div>
-                  <p className="mt-1 text-[10px] text-[#2d2d2d]/50">
-                    Restrict this course to a specific date window. Leave blank to use the full timetable range.
-                  </p>
-                </div>
-
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
-                      Available weekdays
-                    </span>
-                    <button
-                      onClick={() => updateCourse(course.id, { allowedWeekdays: [] })}
-                      className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
-                    >
-                      All days
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {WEEKDAY_LABELS.map((lbl, wd) => {
-                      const active = wdAll || wdRule.includes(wd);
-                      return (
-                        <button
-                          key={wd}
-                          title={WEEKDAY_FULL[wd]}
-                          onClick={() => {
-                            const base = wdAll ? [] : [...wdRule];
-                            const next = base.includes(wd)
-                              ? base.filter((x) => x !== wd)
-                              : [...base, wd].sort();
-                            updateCourse(course.id, {
-                              allowedWeekdays: next.length === 7 ? [] : next,
-                            });
-                          }}
-                          className={
-                            "flex h-9 w-9 items-center justify-center border text-xs font-bold " +
-                            (active
-                              ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
-                              : "border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/40 hover:border-[#0d0d0d]/50")
+                <div className="max-h-[70vh] overflow-y-auto p-4 space-y-4">
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                        Active date range
+                      </span>
+                      <button
+                        onClick={() =>
+                          updateCourse(course.id, { fromDate: undefined, toDate: undefined })
+                        }
+                        className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                      >
+                        All dates
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60">
+                        <span>From</span>
+                        <input
+                          type="date"
+                          value={course.fromDate ?? ""}
+                          onChange={(e) =>
+                            updateCourse(course.id, { fromDate: e.target.value || undefined })
                           }
-                          style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
-                        >
-                          {lbl}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="mt-1 text-[10px] text-[#2d2d2d]/50">
-                    Pick the weekdays this faculty is available. Deselect all to
-                    treat every day as allowed.
-                  </p>
-                </div>
-
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
-                      Available periods
-                    </span>
-                    <button
-                      onClick={() => updateCourse(course.id, { allowedSlots: [] })}
-                      className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
-                    >
-                      All periods
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                    {nonBreakIdxs.map(({ sl, i }) => {
-                      const active = slotAll || slotRule.includes(i);
-                      const periodNum =
-                        state.slots.slice(0, i + 1).filter((x) => !x.isBreak).length;
-                      return (
-                        <button
-                          key={i}
-                          onClick={() => {
-                            const allIdxs = nonBreakIdxs.map((x) => x.i);
-                            const base = slotAll ? [] : [...slotRule];
-                            const next = base.includes(i)
-                              ? base.filter((x) => x !== i)
-                              : [...base, i].sort((a, b) => a - b);
-                            updateCourse(course.id, {
-                              allowedSlots:
-                                next.length === allIdxs.length ? [] : next,
-                            });
-                          }}
-                          className={
-                            "flex items-center justify-between gap-2 border px-2 py-1.5 text-left text-xs " +
-                            (active
-                              ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
-                              : "border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/60 hover:border-[#0d0d0d]/50")
+                          className="border border-[#0d0d0d]/20 bg-white px-2 py-1 text-xs outline-none focus:border-[#0d0d0d]"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60">
+                        <span>To</span>
+                        <input
+                          type="date"
+                          value={course.toDate ?? ""}
+                          onChange={(e) =>
+                            updateCourse(course.id, { toDate: e.target.value || undefined })
                           }
-                        >
-                          <span
-                            className="font-bold"
-                            style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
-                          >
-                            P{periodNum}
-                          </span>
-                          <span
-                            className="text-[10px] opacity-80"
+                          className="border border-[#0d0d0d]/20 bg-white px-2 py-1 text-xs outline-none focus:border-[#0d0d0d]"
+                        />
+                      </label>
+                    </div>
+                    <p className="mt-1 text-[10px] text-[#2d2d2d]/50">
+                      Restrict this course to a specific date window. Leave blank to use the full
+                      timetable range.
+                    </p>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                        Available weekdays
+                      </span>
+                      <button
+                        onClick={() => updateCourse(course.id, { allowedWeekdays: [] })}
+                        className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                      >
+                        All days
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {WEEKDAY_LABELS.map((lbl, wd) => {
+                        const active = wdAll || wdRule.includes(wd);
+                        return (
+                          <button
+                            key={wd}
+                            title={WEEKDAY_FULL[wd]}
+                            onClick={() => {
+                              const base = wdAll ? [] : [...wdRule];
+                              const next = base.includes(wd)
+                                ? base.filter((x) => x !== wd)
+                                : [...base, wd].sort();
+                              updateCourse(course.id, {
+                                allowedWeekdays: next.length === 7 ? [] : next,
+                              });
+                            }}
+                            className={
+                              "flex h-9 w-9 items-center justify-center border text-xs font-bold " +
+                              (active
+                                ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
+                                : "border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/40 hover:border-[#0d0d0d]/50")
+                            }
                             style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                           >
-                            {slotLabel(sl)}
-                          </span>
-                        </button>
-                      );
-                    })}
+                            {lbl}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-1 text-[10px] text-[#2d2d2d]/50">
+                      Pick the weekdays this faculty is available. Deselect all to treat every day
+                      as allowed.
+                    </p>
                   </div>
-                  <p className="mt-1 text-[10px] text-[#2d2d2d]/50">
-                    Pick the periods this course can be scheduled in. Break
-                    slots are excluded.
-                  </p>
-                </div>
 
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
-                      Per-weekday periods
-                    </span>
-                    <button
-                      onClick={() =>
-                        updateCourse(course.id, { allowedSlotsByWeekday: undefined })
-                      }
-                      className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
-                    >
-                      Reset all
-                    </button>
-                  </div>
-                  <p className="mb-2 text-[10px] text-[#2d2d2d]/50">
-                    Optional. Override the default periods above for specific
-                    weekdays (e.g. Mon P1–P2, Thu P5–P6). Unset weekdays fall
-                    back to the default.
-                  </p>
-                  <div className="space-y-1.5">
-                    {WEEKDAY_LABELS.map((_lbl, wd) => {
-                      if (!wdAll && !wdRule.includes(wd)) return null;
-                      const byWd = course.allowedSlotsByWeekday ?? {};
-                      const override = byWd[wd];
-                      const isCustom = override !== undefined;
-                      const activeSet = isCustom
-                        ? new Set(override)
-                        : new Set(slotAll ? nonBreakIdxs.map((x) => x.i) : slotRule);
-                      return (
-                        <div
-                          key={wd}
-                          className="border border-[#0d0d0d]/15 bg-white px-2 py-1.5"
-                        >
-                          <div className="mb-1 flex items-center justify-between">
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                        Available periods
+                      </span>
+                      <button
+                        onClick={() => updateCourse(course.id, { allowedSlots: [] })}
+                        className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                      >
+                        All periods
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                      {nonBreakIdxs.map(({ sl, i }) => {
+                        const active = slotAll || slotRule.includes(i);
+                        const periodNum = state.slots
+                          .slice(0, i + 1)
+                          .filter((x) => !x.isBreak).length;
+                        return (
+                          <button
+                            key={i}
+                            onClick={() => {
+                              const allIdxs = nonBreakIdxs.map((x) => x.i);
+                              const base = slotAll ? [] : [...slotRule];
+                              const next = base.includes(i)
+                                ? base.filter((x) => x !== i)
+                                : [...base, i].sort((a, b) => a - b);
+                              updateCourse(course.id, {
+                                allowedSlots: next.length === allIdxs.length ? [] : next,
+                              });
+                            }}
+                            className={
+                              "flex items-center justify-between gap-2 border px-2 py-1.5 text-left text-xs " +
+                              (active
+                                ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
+                                : "border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/60 hover:border-[#0d0d0d]/50")
+                            }
+                          >
                             <span
-                              className="text-[10px] font-bold uppercase tracking-wider"
+                              className="font-bold"
                               style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
                             >
-                              {WEEKDAY_FULL[wd]}
-                              {!isCustom && (
-                                <span className="ml-1 text-[9px] font-normal text-[#2d2d2d]/40">
-                                  · default
-                                </span>
-                              )}
+                              P{periodNum}
                             </span>
-                            {isCustom && (
-                              <button
-                                onClick={() => {
-                                  const next = { ...byWd };
-                                  delete next[wd];
-                                  updateCourse(course.id, {
-                                    allowedSlotsByWeekday:
-                                      Object.keys(next).length > 0 ? next : undefined,
-                                  });
-                                }}
-                                className="text-[9px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                            <span
+                              className="text-[10px] opacity-80"
+                              style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                            >
+                              {slotLabel(sl)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-1 text-[10px] text-[#2d2d2d]/50">
+                      Pick the periods this course can be scheduled in. Break slots are excluded.
+                    </p>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                        Per-weekday periods
+                      </span>
+                      <button
+                        onClick={() =>
+                          updateCourse(course.id, { allowedSlotsByWeekday: undefined })
+                        }
+                        className="text-[10px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
+                      >
+                        Reset all
+                      </button>
+                    </div>
+                    <p className="mb-2 text-[10px] text-[#2d2d2d]/50">
+                      Optional. Override the default periods above for specific weekdays (e.g. Mon
+                      P1–P2, Thu P5–P6). Unset weekdays fall back to the default.
+                    </p>
+                    <div className="space-y-1.5">
+                      {WEEKDAY_LABELS.map((_lbl, wd) => {
+                        if (!wdAll && !wdRule.includes(wd)) return null;
+                        const byWd = course.allowedSlotsByWeekday ?? {};
+                        const override = byWd[wd];
+                        const isCustom = override !== undefined;
+                        const activeSet = isCustom
+                          ? new Set(override)
+                          : new Set(slotAll ? nonBreakIdxs.map((x) => x.i) : slotRule);
+                        return (
+                          <div key={wd} className="border border-[#0d0d0d]/15 bg-white px-2 py-1.5">
+                            <div className="mb-1 flex items-center justify-between">
+                              <span
+                                className="text-[10px] font-bold uppercase tracking-wider"
+                                style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
                               >
-                                Reset
-                              </button>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap gap-1">
-                            {nonBreakIdxs.map(({ i }) => {
-                              const periodNum = state.slots
-                                .slice(0, i + 1)
-                                .filter((x) => !x.isBreak).length;
-                              const on = activeSet.has(i);
-                              return (
+                                {WEEKDAY_FULL[wd]}
+                                {!isCustom && (
+                                  <span className="ml-1 text-[9px] font-normal text-[#2d2d2d]/40">
+                                    · default
+                                  </span>
+                                )}
+                              </span>
+                              {isCustom && (
                                 <button
-                                  key={i}
                                   onClick={() => {
-                                    const baseArr = isCustom
-                                      ? [...override!]
-                                      : slotAll
-                                        ? nonBreakIdxs.map((x) => x.i)
-                                        : [...slotRule];
-                                    const nextArr = baseArr.includes(i)
-                                      ? baseArr.filter((x) => x !== i)
-                                      : [...baseArr, i].sort((a, b) => a - b);
-                                    const nextByWd = { ...byWd, [wd]: nextArr };
+                                    const next = { ...byWd };
+                                    delete next[wd];
                                     updateCourse(course.id, {
-                                      allowedSlotsByWeekday: nextByWd,
+                                      allowedSlotsByWeekday:
+                                        Object.keys(next).length > 0 ? next : undefined,
                                     });
                                   }}
-                                  className={
-                                    "min-w-[2.25rem] border px-1.5 py-0.5 text-[10px] font-bold " +
-                                    (on
-                                      ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
-                                      : isCustom
-                                        ? "border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/40 hover:border-[#0d0d0d]/50"
-                                        : "border-dashed border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/30 hover:border-[#0d0d0d]/40")
-                                  }
-                                  style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                                  className="text-[9px] uppercase tracking-wider text-[#2d2d2d]/50 hover:text-[#0d0d0d]"
                                 >
-                                  P{periodNum}
+                                  Reset
                                 </button>
-                              );
-                            })}
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {nonBreakIdxs.map(({ i }) => {
+                                const periodNum = state.slots
+                                  .slice(0, i + 1)
+                                  .filter((x) => !x.isBreak).length;
+                                const on = activeSet.has(i);
+                                return (
+                                  <button
+                                    key={i}
+                                    onClick={() => {
+                                      const baseArr = isCustom
+                                        ? [...override!]
+                                        : slotAll
+                                          ? nonBreakIdxs.map((x) => x.i)
+                                          : [...slotRule];
+                                      const nextArr = baseArr.includes(i)
+                                        ? baseArr.filter((x) => x !== i)
+                                        : [...baseArr, i].sort((a, b) => a - b);
+                                      const nextByWd = { ...byWd, [wd]: nextArr };
+                                      updateCourse(course.id, {
+                                        allowedSlotsByWeekday: nextByWd,
+                                      });
+                                    }}
+                                    className={
+                                      "min-w-[2.25rem] border px-1.5 py-0.5 text-[10px] font-bold " +
+                                      (on
+                                        ? "border-[#0d0d0d] bg-[#0d0d0d] text-[#f5f3ee]"
+                                        : isCustom
+                                          ? "border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/40 hover:border-[#0d0d0d]/50"
+                                          : "border-dashed border-[#0d0d0d]/20 bg-white text-[#2d2d2d]/30 hover:border-[#0d0d0d]/40")
+                                    }
+                                    style={{
+                                      fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                                    }}
+                                  >
+                                    P{periodNum}
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="flex justify-end border-t-2 border-[#0d0d0d] bg-[#e8e4dd] px-4 py-2">
-                <button
-                  onClick={() => setRulesFor(null)}
-                  className="border-2 border-[#0d0d0d] bg-[#f5f3ee] px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider hover:bg-[#0d0d0d] hover:text-[#f5f3ee]"
-                >
-                  Done
-                </button>
+                <div className="flex justify-end border-t-2 border-[#0d0d0d] bg-[#e8e4dd] px-4 py-2">
+                  <button
+                    onClick={() => setRulesFor(null)}
+                    className="border-2 border-[#0d0d0d] bg-[#f5f3ee] px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider hover:bg-[#0d0d0d] hover:text-[#f5f3ee]"
+                  >
+                    Done
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
       {autoStatus && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0d0d0d]/60 backdrop-blur-sm">
           <div className="w-[min(420px,90vw)] border-2 border-[#0d0d0d] bg-[#f5f3ee] p-5 shadow-[6px_6px_0_#0d0d0d]">
@@ -3848,8 +4148,13 @@ function Index() {
           >
             <div className="flex items-center justify-between border-b-2 border-[#0d0d0d] bg-indigo-700 px-4 py-3 text-white">
               <div>
-                <div className="text-[10px] font-bold uppercase tracking-widest text-white/70">Admin Mode</div>
-                <div className="text-sm font-bold" style={{ fontFamily: "'Sora', system-ui, sans-serif" }}>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-white/70">
+                  Admin Mode
+                </div>
+                <div
+                  className="text-sm font-bold"
+                  style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                >
                   Cross-check timetables across classes
                 </div>
               </div>
@@ -3910,8 +4215,8 @@ function Index() {
                         <span className="truncate">
                           <span className="font-semibold">{r.name}</span>
                           <span className="ml-2 text-[#2d2d2d]/60">
-                            {r.state.classes.length} class{r.state.classes.length === 1 ? "" : "es"} ·
-                            {" "}{r.state.fromDate} → {r.state.toDate}
+                            {r.state.classes.length} class{r.state.classes.length === 1 ? "" : "es"}{" "}
+                            · {r.state.fromDate} → {r.state.toDate}
                           </span>
                         </span>
                         <button
@@ -3938,7 +4243,9 @@ function Index() {
                         : "border-red-700 bg-red-50 text-red-700")
                     }
                   >
-                    {adminReport.length === 0 ? "No conflicts" : `${adminReport.length} conflict${adminReport.length === 1 ? "" : "s"}`}
+                    {adminReport.length === 0
+                      ? "No conflicts"
+                      : `${adminReport.length} conflict${adminReport.length === 1 ? "" : "s"}`}
                   </span>
                 </div>
                 {adminReport.length > 0 && (
@@ -3948,7 +4255,9 @@ function Index() {
                         <tr>
                           <th className="border border-[#0d0d0d]/40 px-2 py-1 text-left">Date</th>
                           <th className="border border-[#0d0d0d]/40 px-2 py-1 text-left">Period</th>
-                          <th className="border border-[#0d0d0d]/40 px-2 py-1 text-left">Faculty conflict</th>
+                          <th className="border border-[#0d0d0d]/40 px-2 py-1 text-left">
+                            Faculty conflict
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3961,10 +4270,16 @@ function Index() {
                           });
                           return (
                             <tr key={row.key} className="odd:bg-[#f5f3ee]">
-                              <td className="border border-[#0d0d0d]/20 px-2 py-1 align-top" style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
+                              <td
+                                className="border border-[#0d0d0d]/20 px-2 py-1 align-top"
+                                style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                              >
                                 {row.date}
                               </td>
-                              <td className="border border-[#0d0d0d]/20 px-2 py-1 align-top" style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
+                              <td
+                                className="border border-[#0d0d0d]/20 px-2 py-1 align-top"
+                                style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                              >
                                 {periodLabelFor(row.slotIdx)}
                               </td>
                               <td className="border border-[#0d0d0d]/20 px-2 py-1 align-top">
@@ -3973,7 +4288,10 @@ function Index() {
                                     <span className="font-bold">{faculty}</span>
                                     <span className="text-[#2d2d2d]/70"> — busy in </span>
                                     {entries.map((e, i) => (
-                                      <span key={i} className="mr-1 inline-block border border-[#0d0d0d]/40 bg-white px-1">
+                                      <span
+                                        key={i}
+                                        className="mr-1 inline-block border border-[#0d0d0d]/40 bg-white px-1"
+                                      >
                                         {e.origin} / {e.className} · {e.courseName}
                                       </span>
                                     ))}
@@ -3989,7 +4307,8 @@ function Index() {
                 )}
                 {adminReport.length === 0 && adminRefs.length > 0 && (
                   <div className="border-2 border-green-700 bg-green-50 p-3 text-xs text-green-800">
-                    All references cross-checked — no shared faculty is double-booked in the same date + period.
+                    All references cross-checked — no shared faculty is double-booked in the same
+                    date + period.
                   </div>
                 )}
               </div>
@@ -4012,8 +4331,13 @@ function Index() {
       >
         <div className="flex items-center justify-between border-b-2 border-[#0d0d0d] bg-red-700 px-4 py-3 text-white">
           <div>
-            <div className="text-[10px] font-bold uppercase tracking-widest text-white/70">Timetable Checker</div>
-            <div className="text-sm font-bold" style={{ fontFamily: "'Sora', system-ui, sans-serif" }}>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-white/70">
+              Timetable Checker
+            </div>
+            <div
+              className="text-sm font-bold"
+              style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+            >
               Overlap & Rule Warnings ({conflictDetailsList.length})
             </div>
           </div>
@@ -4024,13 +4348,15 @@ function Index() {
             Close
           </button>
         </div>
-        
+
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {conflictDetailsList.length === 0 ? (
             <div className="border-2 border-dashed border-green-700 bg-green-50 p-6 text-center text-green-800">
               <span className="text-2xl block mb-2">🎉</span>
               <div className="font-bold text-sm">No Conflicts Found</div>
-              <div className="text-xs text-green-700/80 mt-1">All classes look good! No faculty double-bookings or rule violations.</div>
+              <div className="text-xs text-green-700/80 mt-1">
+                All classes look good! No faculty double-bookings or rule violations.
+              </div>
             </div>
           ) : (
             conflictDetailsList.map((warn) => (
@@ -4040,24 +4366,26 @@ function Index() {
                 className="w-full text-left border-2 border-[#0d0d0d] bg-white p-3 hover:bg-[#e8e4dd] transition-all hover:-translate-y-0.5 hover:shadow-[3px_3px_0px_0px_#0d0d0d] flex flex-col gap-2 group active:translate-y-0 active:shadow-[1px_1px_0px_0px_#0d0d0d]"
               >
                 <div className="flex items-center justify-between w-full">
-                  <span className={`px-2 py-0.5 text-[9px] font-bold uppercase border ${
-                    warn.type === 'faculty' 
-                      ? 'border-red-600 bg-red-50 text-red-700' 
-                      : 'border-amber-600 bg-amber-50 text-amber-700'
-                  }`}>
-                    {warn.type === 'faculty' ? 'Faculty Overlap' : 'Rule Violation'}
+                  <span
+                    className={`px-2 py-0.5 text-[9px] font-bold uppercase border ${
+                      warn.type === "faculty"
+                        ? "border-red-600 bg-red-50 text-red-700"
+                        : "border-amber-600 bg-amber-50 text-amber-700"
+                    }`}
+                  >
+                    {warn.type === "faculty" ? "Faculty Overlap" : "Rule Violation"}
                   </span>
                   <span className="text-[10px] font-bold uppercase tracking-wider bg-[#0d0d0d]/5 px-1.5 py-0.5 rounded">
                     {warn.className}
                   </span>
                 </div>
-                
-                <div className="text-xs font-semibold text-[#0d0d0d]">
-                  {warn.description}
-                </div>
-                
+
+                <div className="text-xs font-semibold text-[#0d0d0d]">{warn.description}</div>
+
                 <div className="flex items-center justify-between text-[10px] text-[#2d2d2d]/60 font-mono mt-1 border-t border-dashed border-[#0d0d0d]/10 pt-2 w-full">
-                  <span>{warn.weekday}, {warn.date} · {warn.periodLabel}</span>
+                  <span>
+                    {warn.weekday}, {warn.date} · {warn.periodLabel}
+                  </span>
                   <span className="text-[9px] font-bold uppercase text-indigo-700 group-hover:underline flex items-center gap-1">
                     Locate Cell &rarr;
                   </span>
