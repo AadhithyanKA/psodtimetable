@@ -75,6 +75,8 @@ type ClassData = {
   name: string;
   grid: Record<string, Cell>;
   courses: Course[];
+  // Optional department assignment for grouping in reports.
+  department?: string;
   // Optional per-class date range overrides. Undefined = fall back to state.fromDate/state.toDate.
   fromDate?: string;
   toDate?: string;
@@ -3026,8 +3028,19 @@ function Index() {
       }`;
     };
 
+    // Group classes by department (undefined/blank → "Unassigned")
+    const deptMap = new Map<string, ClassData[]>();
+    state.classes.forEach((cls) => {
+      const dept = cls.department?.trim() || "Unassigned";
+      const list = deptMap.get(dept) ?? [];
+      list.push(cls);
+      deptMap.set(dept, list);
+    });
+
+    // Header has a "Class" column between # and Course Code
     const HEADER = [
       "#",
+      "Class",
       "Course Code",
       "Faculty",
       "L",
@@ -3038,7 +3051,11 @@ function Index() {
       "Placed Classes",
       "Missing",
     ];
-    const COL_WIDTHS = [5, 34, 24, 5, 5, 5, 5, 14, 14, 12];
+    const COL_WIDTHS = [5, 22, 30, 22, 5, 5, 5, 5, 14, 14, 12];
+    // Column indices for data checks
+    const COL_TOTAL = 8;
+    const COL_PLACED = 9;
+    const COL_MISSING = 10;
 
     const headerStyle: Record<string, unknown> = {
       alignment: { horizontal: "center", vertical: "center", wrapText: true },
@@ -3047,47 +3064,53 @@ function Index() {
       fill: { patternType: "solid", fgColor: { rgb: "0D0D0D" } },
     };
 
-    state.classes.forEach((cls) => {
-      const clsState = stateForClass(cls, state);
-      const clsDates = classDatesFor(cls, state);
-      const weekCount = new Set(clsDates.map(isoWeekKey)).size;
+    const usedSheetNames = new Set<string>();
 
+    deptMap.forEach((classes, dept) => {
       const rows: (string | number)[][] = [HEADER];
-      cls.courses.forEach((course, idx) => {
-        const L = Math.max(0, course.lectureHours ?? 0);
-        const T = Math.max(0, course.tutorialHours ?? 0);
-        const P = Math.max(0, course.practicalHours ?? 0);
-        const C = Math.max(0, course.credits ?? 0);
+      let globalIdx = 0;
 
-        const totalT = courseTotalTarget(course, courseSemesterWeeks(course, clsState));
-        const total = totalT > 0 ? totalT : courseWeeklyTarget(course) * weekCount;
-        const placed = countCoursePeriodsInDates(cls.grid, course, state.slots, clsDates);
-        const missing = Math.max(0, total - placed);
+      let deptTotalExpected = 0;
+      let deptTotalPlaced = 0;
 
-        rows.push([
-          idx + 1,
-          course.name,
-          course.faculty || "",
-          L,
-          T,
-          P,
-          C,
-          total > 0 ? total : 0,
-          placed,
-          missing > 0 ? missing : "",
-        ]);
+      classes.forEach((cls) => {
+        const clsState = stateForClass(cls, state);
+        const clsDates = classDatesFor(cls, state);
+        const weekCount = new Set(clsDates.map(isoWeekKey)).size;
+
+        cls.courses.forEach((course) => {
+          globalIdx++;
+          const L = Math.max(0, course.lectureHours ?? 0);
+          const T = Math.max(0, course.tutorialHours ?? 0);
+          const P = Math.max(0, course.practicalHours ?? 0);
+          const C = Math.max(0, course.credits ?? 0);
+
+          const totalT = courseTotalTarget(course, courseSemesterWeeks(course, clsState));
+          const total = totalT > 0 ? totalT : courseWeeklyTarget(course) * weekCount;
+          const placed = countCoursePeriodsInDates(cls.grid, course, state.slots, clsDates);
+          const missing = Math.max(0, total - placed);
+
+          deptTotalExpected += total > 0 ? total : 0;
+          deptTotalPlaced += placed;
+
+          rows.push([
+            globalIdx,
+            cls.name,
+            course.name,
+            course.faculty || "",
+            L,
+            T,
+            P,
+            C,
+            total > 0 ? total : 0,
+            placed,
+            missing > 0 ? missing : "",
+          ]);
+        });
       });
 
-      // Totals row
-      const totalPlaced = cls.courses.reduce(
-        (s, c) => s + countCoursePeriodsInDates(cls.grid, c, state.slots, clsDates),
-        0,
-      );
-      const totalExpected = cls.courses.reduce((s, course) => {
-        const totalT = courseTotalTarget(course, courseSemesterWeeks(course, clsState));
-        return s + (totalT > 0 ? totalT : courseWeeklyTarget(course) * weekCount);
-      }, 0);
-      const totalMissing = Math.max(0, totalExpected - totalPlaced);
+      // Department totals row
+      const deptMissing = Math.max(0, deptTotalExpected - deptTotalPlaced);
       rows.push([
         "",
         "TOTAL",
@@ -3096,9 +3119,10 @@ function Index() {
         "",
         "",
         "",
-        totalExpected,
-        totalPlaced,
-        totalMissing > 0 ? totalMissing : "",
+        "",
+        deptTotalExpected,
+        deptTotalPlaced,
+        deptMissing > 0 ? deptMissing : "",
       ]);
 
       const ws = XLSXStyle.utils.aoa_to_sheet(rows);
@@ -3121,39 +3145,41 @@ function Index() {
           if (r === 0) {
             cs = headerStyle;
           } else if (r === totalsRowIdx) {
-            // Totals row: dark tint
-            const isMissing = c === 9 && (rows[r][c] as number) > 0;
+            const isMissingTotals = c === COL_MISSING && (rows[r][c] as number) > 0;
             cs = {
-              alignment: { horizontal: c <= 1 ? "left" : "center", vertical: "center" },
+              alignment: { horizontal: c <= 2 ? "left" : "center", vertical: "center" },
               border: bb,
               font: {
                 name: "Calibri",
                 sz: 11,
                 bold: true,
-                color: { rgb: isMissing ? "B91C1C" : "FFFFFF" },
+                color: { rgb: isMissingTotals ? "B91C1C" : "FFFFFF" },
               },
-              fill: { patternType: "solid", fgColor: { rgb: isMissing ? "FEE2E2" : "374151" } },
+              fill: {
+                patternType: "solid",
+                fgColor: { rgb: isMissingTotals ? "FEE2E2" : "374151" },
+              },
             };
           } else {
-            // Data rows
-            const missing = rows[r][9] as number | string;
-            const isMissingCell = c === 9 && missing !== "" && (missing as number) > 0;
-            const isPlacedCell = c === 8;
-            const total = rows[r][7] as number;
-            const placed2 = rows[r][8] as number;
+            const missingVal = rows[r][COL_MISSING] as number | string;
+            const isMissingCell =
+              c === COL_MISSING && missingVal !== "" && (missingVal as number) > 0;
+            const isPlacedCell = c === COL_PLACED;
+            const total = rows[r][COL_TOTAL] as number;
+            const placed2 = rows[r][COL_PLACED] as number;
             const complete = total > 0 && placed2 >= total;
 
             cs = {
               alignment: {
-                horizontal: c <= 2 ? (c === 0 ? "center" : "left") : "center",
+                horizontal: c <= 3 ? (c === 0 ? "center" : "left") : "center",
                 vertical: "center",
-                wrapText: c <= 2,
+                wrapText: c <= 3,
               },
               border: bb,
               font: {
                 name: "Calibri",
                 sz: 11,
-                bold: c <= 1,
+                bold: c <= 2,
                 color: isMissingCell
                   ? { rgb: "B91C1C" }
                   : isPlacedCell && complete
@@ -3172,25 +3198,23 @@ function Index() {
         }
       }
 
-      // Safe sheet name
+      // Safe unique sheet name from department name
       const rawName =
-        cls.name
+        dept
           .replace(/[\\/?*[\]:]/g, "_")
           .slice(0, 31)
-          .trim() || "Class";
+          .trim() || "Unassigned";
       let sheetName = rawName;
       let n = 1;
-      while (
-        wb.SheetNames &&
-        wb.SheetNames.map((s: string) => s.toLowerCase()).includes(sheetName.toLowerCase())
-      ) {
+      while (usedSheetNames.has(sheetName.toLowerCase())) {
         const suffix = ` (${n++})`;
         sheetName = rawName.slice(0, 31 - suffix.length) + suffix;
       }
+      usedSheetNames.add(sheetName.toLowerCase());
       XLSXStyle.utils.book_append_sheet(wb, ws, sheetName);
     });
 
-    XLSXStyle.writeFile(wb, `summary_report_${state.fromDate}_to_${state.toDate}.xlsx`);
+    XLSXStyle.writeFile(wb, `department_summary_${state.fromDate}_to_${state.toDate}.xlsx`);
   };
 
   const exportFacultyExcel = () => {
@@ -6200,34 +6224,62 @@ function Index() {
                     className="border border-[#7c3aed]/20 bg-white shadow-[2px_2px_0px_0px_rgba(124,58,237,0.12)]"
                   >
                     {/* Class row */}
-                    <div className="flex items-center gap-2 px-3 py-2 bg-[#ede9fe]/40 border-b border-[#7c3aed]/10">
-                      <button
-                        onClick={() => setExpandedControlClass(isExpanded ? null : cls.id)}
-                        className="min-w-0 flex-1 flex items-center gap-2 text-left"
-                      >
-                        <span className="text-[10px] text-[#7c3aed]/50 font-mono shrink-0">
-                          {isExpanded ? "▼" : "▶"}
-                        </span>
-                        <span
-                          className="text-xs font-bold text-[#2d2d2d] truncate"
-                          style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                    <div className="flex flex-col border-b border-[#7c3aed]/10">
+                      <div className="flex items-center gap-2 px-3 py-2 bg-[#ede9fe]/40">
+                        <button
+                          onClick={() => setExpandedControlClass(isExpanded ? null : cls.id)}
+                          className="min-w-0 flex-1 flex items-center gap-2 text-left"
                         >
-                          {cls.name}
+                          <span className="text-[10px] text-[#7c3aed]/50 font-mono shrink-0">
+                            {isExpanded ? "▼" : "▶"}
+                          </span>
+                          <span
+                            className="text-xs font-bold text-[#2d2d2d] truncate"
+                            style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                          >
+                            {cls.name}
+                          </span>
+                          <span className="text-[9px] text-[#2d2d2d]/40 font-normal shrink-0">
+                            ({cls.courses.length} course{cls.courses.length === 1 ? "" : "s"})
+                          </span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            exportClassTimetable(cls);
+                          }}
+                          className="shrink-0 flex items-center gap-1 border border-[#7c3aed]/40 bg-[#ede9fe] px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-[#7c3aed] hover:bg-[#ddd6fe] transition active:translate-y-0.5"
+                          title="Download class timetable (Summary + Timetable)"
+                        >
+                          📊 Class
+                        </button>
+                      </div>
+                      {/* Department row */}
+                      <div className="flex items-center gap-2 px-3 pb-2 bg-[#ede9fe]/20">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-[#7c3aed]/50 shrink-0">
+                          Dept:
                         </span>
-                        <span className="text-[9px] text-[#2d2d2d]/40 font-normal shrink-0">
-                          ({cls.courses.length} course{cls.courses.length === 1 ? "" : "s"})
-                        </span>
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          exportClassTimetable(cls);
-                        }}
-                        className="shrink-0 flex items-center gap-1 border border-[#7c3aed]/40 bg-[#ede9fe] px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-[#7c3aed] hover:bg-[#ddd6fe] transition active:translate-y-0.5"
-                        title="Download class timetable (Summary + Timetable)"
-                      >
-                        📊 Class
-                      </button>
+                        <input
+                          type="text"
+                          value={cls.department ?? ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setState((s) => ({
+                              ...s,
+                              classes: s.classes.map((cl) =>
+                                cl.id === cls.id ? { ...cl, department: val } : cl,
+                              ),
+                            }));
+                          }}
+                          placeholder="e.g. Computer Science"
+                          className="min-w-0 flex-1 bg-white border border-[#7c3aed]/20 px-2 py-0.5 text-[10px] text-[#2d2d2d] placeholder:text-[#2d2d2d]/30 outline-none focus:border-[#7c3aed]/60 focus:ring-0 rounded-none"
+                        />
+                        {cls.department?.trim() && (
+                          <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 bg-[#7c3aed] text-white rounded">
+                            {cls.department.trim()}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Courses list */}
