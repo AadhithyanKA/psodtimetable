@@ -775,6 +775,8 @@ function Index() {
     y: number;
   } | null>(null);
   const [facultyPanelOpen, setFacultyPanelOpen] = useState(false);
+  const [controlPanelOpen, setControlPanelOpen] = useState(false);
+  const [expandedControlClass, setExpandedControlClass] = useState<string | null>(null);
   const [selectedFaculty, setSelectedFaculty] = useState<string | null>(null);
   const [editingFaculty, setEditingFaculty] = useState<string | null>(null);
   const [facultyEditVal, setFacultyEditVal] = useState("");
@@ -2486,6 +2488,342 @@ function Index() {
     });
     XLSXStyle.writeFile(wb, `timetable_${state.fromDate}_to_${state.toDate}.xlsx`);
   };
+  // ─── Shared helpers: Summary+Gantt sheet ────────────────────────────────
+  const buildSummaryData = (
+    entries: Array<{ course: Course; cls: ClassData }>,
+    refCls?: ClassData | null,
+  ): {
+    rows: (string | number)[][];
+    ganttStartCol: number;
+    weeks: number[];
+    courseWeekHits: Set<number>[];
+  } => {
+    const ref = refCls ?? activeClass ?? state.classes[0];
+    const allDates = daysBetween(state.fromDate, state.toDate);
+    const weekNums = new Set<number>();
+    if (ref) allDates.forEach((d) => weekNums.add(weekIndexForDate(ref, state, d)));
+    const weeks = Array.from(weekNums).sort((a, b) => a - b);
+    const ganttStartCol = 8;
+
+    const courseWeekHits: Set<number>[] = entries.map(({ course, cls }) => {
+      const hits = new Set<number>();
+      classDatesFor(cls, state).forEach((date) => {
+        state.slots.forEach((_, si) => {
+          const cell = cls.grid[`${date}-${si}`];
+          if (cell?.kind === "course" && cell.courseId === course.id)
+            hits.add(weekIndexForDate(ref ?? cls, state, date));
+        });
+      });
+      return hits;
+    });
+
+    const header: (string | number)[] = [
+      "#",
+      "Course",
+      "Faculty",
+      "L",
+      "T",
+      "P",
+      "C",
+      "Periods/Wk",
+      ...weeks.map((w) => `W${w}`),
+    ];
+    const rows: (string | number)[][] = [header];
+    entries.forEach(({ course }, idx) => {
+      const L = Math.max(0, course.lectureHours ?? 0);
+      const T = Math.max(0, course.tutorialHours ?? 0);
+      const P = Math.max(0, course.practicalHours ?? 0);
+      const C = Math.max(0, course.credits ?? 0);
+      const wt = courseWeeklyTarget(course);
+      rows.push([
+        idx + 1,
+        course.name,
+        course.faculty || "",
+        L || "",
+        T || "",
+        P || "",
+        C || "",
+        wt > 0 ? wt : "",
+        ...weeks.map((w) => (courseWeekHits[idx].has(w) ? "\u25A0" : "")),
+      ]);
+    });
+    return { rows, ganttStartCol, weeks, courseWeekHits };
+  };
+
+  const applySummaryStyles = (
+    ws: ReturnType<typeof XLSXStyle.utils.aoa_to_sheet>,
+    rows: (string | number)[][],
+    ganttStartCol: number,
+    weeks: number[],
+    courseWeekHits: Set<number>[],
+    entries: Array<{ course: Course }>,
+    hexClean: (h: string) => string,
+    textColorFor: (hex: string) => string,
+  ) => {
+    const numCols = rows[0]?.length ?? 0;
+    const bdr = { style: "thin", color: { rgb: "CCCCCC" } } as const;
+    const bb = { top: bdr, bottom: bdr, left: bdr, right: bdr };
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < numCols; c++) {
+        const addr = XLSXStyle.utils.encode_cell({ r, c });
+        if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+        const cs: Record<string, unknown> = {
+          alignment: {
+            horizontal: c >= ganttStartCol ? "center" : c === 0 ? "center" : "left",
+            vertical: "center",
+            wrapText: true,
+          },
+          border: bb,
+          font: { name: "Calibri", sz: 11 },
+        };
+        if (r === 0) {
+          cs.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } };
+          cs.fill = { patternType: "solid", fgColor: { rgb: "0D0D0D" } };
+        } else {
+          const ei = r - 1;
+          if (c >= ganttStartCol && ei < courseWeekHits.length) {
+            const wn = weeks[c - ganttStartCol];
+            if (wn !== undefined && courseWeekHits[ei].has(wn) && entries[ei]) {
+              const bg = hexClean(entries[ei].course.color);
+              cs.fill = { patternType: "solid", fgColor: { rgb: bg } };
+              cs.font = { name: "Calibri", sz: 14, bold: true, color: { rgb: textColorFor(bg) } };
+              cs.alignment = { horizontal: "center", vertical: "center" };
+            }
+          } else if (c <= 1) {
+            cs.font = { name: "Calibri", sz: 11, bold: true };
+          }
+        }
+        (ws[addr] as { s?: unknown }).s = cs;
+      }
+    }
+    const nRows = rows.length;
+    (ws as unknown as Record<string, unknown>)["!rows"] = Array.from({ length: nRows }, (_, i) => ({
+      hpt: i === 0 ? 26 : 22,
+    }));
+    (ws as unknown as Record<string, unknown>)["!cols"] = [
+      { wch: 5 },
+      { wch: 30 },
+      { wch: 20 },
+      { wch: 5 },
+      { wch: 5 },
+      { wch: 5 },
+      { wch: 5 },
+      { wch: 12 },
+      ...weeks.map(() => ({ wch: 5 })),
+    ];
+    (ws as unknown as Record<string, unknown>)["!freeze"] = { xSplit: 0, ySplit: 1 };
+  };
+
+  const applyTimetableStyles = (
+    ws: ReturnType<typeof XLSXStyle.utils.aoa_to_sheet>,
+    data: (string | number)[][],
+    cls: ClassData,
+    clsDates: string[],
+    hexClean: (h: string) => string,
+    textColorFor: (hex: string) => string,
+  ) => {
+    const numCols = data[0].length;
+    const bdr = { style: "thin", color: { rgb: "CCCCCC" } } as const;
+    const bb = { top: bdr, bottom: bdr, left: bdr, right: bdr };
+    (ws as unknown as Record<string, unknown>)["!cols"] = Array.from(
+      { length: numCols },
+      (_, i) => ({ wch: i === 0 ? 8 : i === 1 ? 18 : 20 }),
+    );
+    (ws as unknown as Record<string, unknown>)["!rows"] = data.map((_, i) => ({
+      hpt: i === 0 ? 24 : 32,
+    }));
+    for (let r = 0; r < data.length; r++) {
+      for (let c = 0; c < numCols; c++) {
+        const addr = XLSXStyle.utils.encode_cell({ r, c });
+        if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+        const cs: Record<string, unknown> = {
+          alignment: { horizontal: "center", vertical: "center", wrapText: true },
+          border: bb,
+          font: { name: "Calibri", sz: 11 },
+        };
+        if (r === 0 || c === 0 || c === 1) {
+          cs.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } };
+          cs.fill = { patternType: "solid", fgColor: { rgb: "0D0D0D" } };
+        } else {
+          const date = clsDates[r - 1];
+          const slotIdx = c - 2;
+          const key = `${date}-${slotIdx}`;
+          const isConf = conflicts.has(`${cls.id}:${key}`);
+          const sl = state.slots[slotIdx];
+          const cell = cls.grid[key];
+          if (isConf) {
+            cs.fill = { patternType: "solid", fgColor: { rgb: "FECACA" } };
+            cs.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: "991B1B" } };
+          } else if (sl?.isBreak || cell?.kind === "break") {
+            cs.fill = { patternType: "solid", fgColor: { rgb: "FDE68A" } };
+            cs.font = { name: "Calibri", sz: 11, italic: true, color: { rgb: "78350F" } };
+          } else if (cell?.kind === "blocked") {
+            cs.fill = { patternType: "solid", fgColor: { rgb: "374151" } };
+            cs.font = { name: "Calibri", sz: 11, color: { rgb: "FFFFFF" } };
+          } else if (cell?.kind === "course") {
+            const course = cls.courses.find((x) => x.id === cell.courseId);
+            const bg = hexClean(course?.color ?? "#DDDDDD");
+            cs.fill = { patternType: "solid", fgColor: { rgb: bg } };
+            cs.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: textColorFor(bg) } };
+          }
+        }
+        (ws[addr] as { s?: unknown }).s = cs;
+      }
+    }
+    (ws as unknown as Record<string, unknown>)["!freeze"] = { xSplit: 2, ySplit: 1 };
+  };
+
+  // Export a single class's timetable as Summary + Timetable sheets
+  const exportClassTimetable = (cls: ClassData) => {
+    const hexClean = (h: string) =>
+      (h || "").replace("#", "").padStart(6, "0").slice(-6).toUpperCase();
+    const textColorFor = (hex: string) => {
+      const h = hexClean(hex);
+      const r2 = parseInt(h.slice(0, 2), 16);
+      const g2 = parseInt(h.slice(2, 4), 16);
+      const b2 = parseInt(h.slice(4, 6), 16);
+      const lum = (0.299 * r2 + 0.587 * g2 + 0.114 * b2) / 255;
+      return lum > 0.6 ? "111111" : "FFFFFF";
+    };
+    const wb = XLSXStyle.utils.book_new();
+    const entries = cls.courses.map((course) => ({ course, cls }));
+    const { rows: sumRows, ganttStartCol, weeks, courseWeekHits } = buildSummaryData(entries, cls);
+    const sumWs = XLSXStyle.utils.aoa_to_sheet(sumRows);
+    applySummaryStyles(
+      sumWs,
+      sumRows,
+      ganttStartCol,
+      weeks,
+      courseWeekHits,
+      entries,
+      hexClean,
+      textColorFor,
+    );
+    XLSXStyle.utils.book_append_sheet(wb, sumWs, "Summary");
+
+    const data = buildSheet(cls);
+    const clsDates = classDatesFor(cls, state);
+    const ttWs = XLSXStyle.utils.aoa_to_sheet(data);
+    applyTimetableStyles(ttWs, data, cls, clsDates, hexClean, textColorFor);
+    XLSXStyle.utils.book_append_sheet(wb, ttWs, "Timetable");
+
+    const cleanName =
+      cls.name
+        .replace(/[\\/?*[\]:]/g, "_")
+        .slice(0, 20)
+        .trim() || "Class";
+    XLSXStyle.writeFile(wb, `class_timetable_${cleanName}.xlsx`);
+  };
+
+  // Export a single course's timetable as Summary + Timetable sheets
+  const exportCourseTimetable = (cls: ClassData, course: Course) => {
+    const hexClean = (h: string) =>
+      (h || "").replace("#", "").padStart(6, "0").slice(-6).toUpperCase();
+    const textColorFor = (hex: string) => {
+      const h = hexClean(hex);
+      const r2 = parseInt(h.slice(0, 2), 16);
+      const g2 = parseInt(h.slice(2, 4), 16);
+      const b2 = parseInt(h.slice(4, 6), 16);
+      const lum = (0.299 * r2 + 0.587 * g2 + 0.114 * b2) / 255;
+      return lum > 0.6 ? "111111" : "FFFFFF";
+    };
+    const wb = XLSXStyle.utils.book_new();
+    const entries = [{ course, cls }];
+    const { rows: sumRows, ganttStartCol, weeks, courseWeekHits } = buildSummaryData(entries, cls);
+    const sumWs = XLSXStyle.utils.aoa_to_sheet(sumRows);
+    applySummaryStyles(
+      sumWs,
+      sumRows,
+      ganttStartCol,
+      weeks,
+      courseWeekHits,
+      entries,
+      hexClean,
+      textColorFor,
+    );
+    XLSXStyle.utils.book_append_sheet(wb, sumWs, "Summary");
+
+    // Course-only timetable sheet
+    const clsDates = classDatesFor(cls, state);
+    const courseHeader = ["Week", "Day / Date", ...state.slots.map(slotLabel)];
+    const courseRows: (string | number)[][] = [courseHeader];
+    clsDates.forEach((date) => {
+      const { weekday, date: dstr } = dayLabel(date);
+      const weekIndex = weekIndexForDate(cls, state, date);
+      const row: (string | number)[] = [`W${weekIndex}`, `${weekday} ${dstr}`];
+      state.slots.forEach((sl, i) => {
+        if (sl.isBreak) {
+          row.push("Break");
+          return;
+        }
+        const cell = cls.grid[`${date}-${i}`];
+        if (cell?.kind === "course" && cell.courseId === course.id) {
+          const P2 = Math.max(0, course.practicalHours ?? 0);
+          const LT2 =
+            Math.max(0, course.lectureHours ?? 0) + Math.max(0, course.tutorialHours ?? 0);
+          const isPractical = P2 > 0 && (LT2 === 0 || (course.durationSlots ?? 1) >= 2);
+          const code = isPractical ? `${course.name}_P` : course.name;
+          row.push(`${code} (${course.faculty})`);
+        } else {
+          row.push("");
+        }
+      });
+      courseRows.push(row);
+    });
+    const ttWs = XLSXStyle.utils.aoa_to_sheet(courseRows);
+    const numCols = courseHeader.length;
+    const bdr = { style: "thin", color: { rgb: "CCCCCC" } } as const;
+    const bb = { top: bdr, bottom: bdr, left: bdr, right: bdr };
+    (ttWs as unknown as Record<string, unknown>)["!cols"] = Array.from(
+      { length: numCols },
+      (_, i) => ({ wch: i === 0 ? 8 : i === 1 ? 18 : 20 }),
+    );
+    (ttWs as unknown as Record<string, unknown>)["!rows"] = courseRows.map((_, i) => ({
+      hpt: i === 0 ? 24 : 32,
+    }));
+    for (let r = 0; r < courseRows.length; r++) {
+      for (let c = 0; c < numCols; c++) {
+        const addr = XLSXStyle.utils.encode_cell({ r, c });
+        if (!ttWs[addr]) ttWs[addr] = { t: "s", v: "" };
+        const cs: Record<string, unknown> = {
+          alignment: { horizontal: "center", vertical: "center", wrapText: true },
+          border: bb,
+          font: { name: "Calibri", sz: 11 },
+        };
+        if (r === 0 || c === 0 || c === 1) {
+          cs.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } };
+          cs.fill = { patternType: "solid", fgColor: { rgb: "0D0D0D" } };
+        } else {
+          const date = clsDates[r - 1];
+          const slotIdx = c - 2;
+          const sl = state.slots[slotIdx];
+          const cell = cls.grid[`${date}-${slotIdx}`];
+          if (sl?.isBreak) {
+            cs.fill = { patternType: "solid", fgColor: { rgb: "FDE68A" } };
+            cs.font = { name: "Calibri", sz: 11, italic: true, color: { rgb: "78350F" } };
+          } else if (cell?.kind === "course" && cell.courseId === course.id) {
+            const bg = hexClean(course.color ?? "#DDDDDD");
+            cs.fill = { patternType: "solid", fgColor: { rgb: bg } };
+            cs.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: textColorFor(bg) } };
+          } else if (cell?.kind === "blocked") {
+            cs.fill = { patternType: "solid", fgColor: { rgb: "F3F4F6" } };
+            cs.font = { name: "Calibri", sz: 11, color: { rgb: "9CA3AF" } };
+          }
+        }
+        (ttWs[addr] as { s?: unknown }).s = cs;
+      }
+    }
+    (ttWs as unknown as Record<string, unknown>)["!freeze"] = { xSplit: 2, ySplit: 1 };
+    XLSXStyle.utils.book_append_sheet(wb, ttWs, "Timetable");
+
+    const cleanName =
+      course.name
+        .replace(/[\\/?*[\]:]/g, "_")
+        .slice(0, 20)
+        .trim() || "Course";
+    XLSXStyle.writeFile(wb, `course_timetable_${cleanName}.xlsx`);
+  };
+
   const exportSingleFacultyExcel = (faculty: string) => {
     const refClass = activeClass || state.classes[0];
     if (!refClass) {
@@ -2503,6 +2841,37 @@ function Index() {
       const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
       return lum > 0.6 ? "111111" : "FFFFFF";
     };
+    // Build Summary sheet (all courses this faculty teaches)
+    const facEntries: Array<{ course: Course; cls: ClassData }> = [];
+    state.classes.forEach((cls) => {
+      cls.courses.forEach((c) => {
+        if (c.faculty) {
+          const names = c.faculty.split(",").map((f) => f.trim().toLowerCase());
+          if (names.includes(faculty.toLowerCase())) facEntries.push({ course: c, cls });
+        }
+      });
+    });
+    if (facEntries.length > 0) {
+      const {
+        rows: sumRows,
+        ganttStartCol,
+        weeks,
+        courseWeekHits,
+      } = buildSummaryData(facEntries, refClass);
+      const sumWs = XLSXStyle.utils.aoa_to_sheet(sumRows);
+      applySummaryStyles(
+        sumWs,
+        sumRows,
+        ganttStartCol,
+        weeks,
+        courseWeekHits,
+        facEntries,
+        hexClean,
+        textColorFor,
+      );
+      XLSXStyle.utils.book_append_sheet(wb, sumWs, "Summary");
+    }
+
     const border = { style: "thin", color: { rgb: "CCCCCC" } } as const;
     const baseBorders = { top: border, bottom: border, left: border, right: border };
 
@@ -2631,6 +3000,199 @@ function Index() {
 
     XLSXStyle.writeFile(wb, `faculty_timetable_${cleanName.replace(/\s+/g, "_")}.xlsx`);
   };
+
+  // Export a classwise summary report: one sheet per class, listing all courses
+  // with LTPC, faculty, total planned periods, placed periods, and missing.
+  const exportSummaryReport = () => {
+    if (state.classes.length === 0) {
+      alert("No classes to export.");
+      return;
+    }
+    const wb = XLSXStyle.utils.book_new();
+    const bdr = { style: "thin", color: { rgb: "CCCCCC" } } as const;
+    const bb = { top: bdr, bottom: bdr, left: bdr, right: bdr };
+
+    const isoWeekKey = (iso: string) => {
+      const d = utcDateFromIso(iso);
+      if (!d) return "invalid";
+      const day = (d.getUTCDay() + 6) % 7;
+      const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day + 3));
+      const first = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+      return `${t.getUTCFullYear()}-W${
+        1 +
+        Math.round(
+          ((t.getTime() - first.getTime()) / 86400000 - 3 + ((first.getUTCDay() + 6) % 7)) / 7,
+        )
+      }`;
+    };
+
+    const HEADER = [
+      "#",
+      "Course Code",
+      "Faculty",
+      "L",
+      "T",
+      "P",
+      "C",
+      "Total Classes",
+      "Placed Classes",
+      "Missing",
+    ];
+    const COL_WIDTHS = [5, 34, 24, 5, 5, 5, 5, 14, 14, 12];
+
+    const headerStyle: Record<string, unknown> = {
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border: bb,
+      font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } },
+      fill: { patternType: "solid", fgColor: { rgb: "0D0D0D" } },
+    };
+
+    state.classes.forEach((cls) => {
+      const clsState = stateForClass(cls, state);
+      const clsDates = classDatesFor(cls, state);
+      const weekCount = new Set(clsDates.map(isoWeekKey)).size;
+
+      const rows: (string | number)[][] = [HEADER];
+      cls.courses.forEach((course, idx) => {
+        const L = Math.max(0, course.lectureHours ?? 0);
+        const T = Math.max(0, course.tutorialHours ?? 0);
+        const P = Math.max(0, course.practicalHours ?? 0);
+        const C = Math.max(0, course.credits ?? 0);
+
+        const totalT = courseTotalTarget(course, courseSemesterWeeks(course, clsState));
+        const total = totalT > 0 ? totalT : courseWeeklyTarget(course) * weekCount;
+        const placed = countCoursePeriodsInDates(cls.grid, course, state.slots, clsDates);
+        const missing = Math.max(0, total - placed);
+
+        rows.push([
+          idx + 1,
+          course.name,
+          course.faculty || "",
+          L,
+          T,
+          P,
+          C,
+          total > 0 ? total : 0,
+          placed,
+          missing > 0 ? missing : "",
+        ]);
+      });
+
+      // Totals row
+      const totalPlaced = cls.courses.reduce(
+        (s, c) => s + countCoursePeriodsInDates(cls.grid, c, state.slots, clsDates),
+        0,
+      );
+      const totalExpected = cls.courses.reduce((s, course) => {
+        const totalT = courseTotalTarget(course, courseSemesterWeeks(course, clsState));
+        return s + (totalT > 0 ? totalT : courseWeeklyTarget(course) * weekCount);
+      }, 0);
+      const totalMissing = Math.max(0, totalExpected - totalPlaced);
+      rows.push([
+        "",
+        "TOTAL",
+        "",
+        "",
+        "",
+        "",
+        "",
+        totalExpected,
+        totalPlaced,
+        totalMissing > 0 ? totalMissing : "",
+      ]);
+
+      const ws = XLSXStyle.utils.aoa_to_sheet(rows);
+      const numCols = HEADER.length;
+
+      (ws as unknown as Record<string, unknown>)["!cols"] = COL_WIDTHS.map((wch) => ({ wch }));
+      (ws as unknown as Record<string, unknown>)["!rows"] = rows.map((_, i) => ({
+        hpt: i === 0 ? 26 : 20,
+      }));
+      (ws as unknown as Record<string, unknown>)["!freeze"] = { xSplit: 0, ySplit: 1 };
+
+      const totalsRowIdx = rows.length - 1;
+
+      for (let r = 0; r < rows.length; r++) {
+        for (let c = 0; c < numCols; c++) {
+          const addr = XLSXStyle.utils.encode_cell({ r, c });
+          if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+          let cs: Record<string, unknown>;
+
+          if (r === 0) {
+            cs = headerStyle;
+          } else if (r === totalsRowIdx) {
+            // Totals row: dark tint
+            const isMissing = c === 9 && (rows[r][c] as number) > 0;
+            cs = {
+              alignment: { horizontal: c <= 1 ? "left" : "center", vertical: "center" },
+              border: bb,
+              font: {
+                name: "Calibri",
+                sz: 11,
+                bold: true,
+                color: { rgb: isMissing ? "B91C1C" : "FFFFFF" },
+              },
+              fill: { patternType: "solid", fgColor: { rgb: isMissing ? "FEE2E2" : "374151" } },
+            };
+          } else {
+            // Data rows
+            const missing = rows[r][9] as number | string;
+            const isMissingCell = c === 9 && missing !== "" && (missing as number) > 0;
+            const isPlacedCell = c === 8;
+            const total = rows[r][7] as number;
+            const placed2 = rows[r][8] as number;
+            const complete = total > 0 && placed2 >= total;
+
+            cs = {
+              alignment: {
+                horizontal: c <= 2 ? (c === 0 ? "center" : "left") : "center",
+                vertical: "center",
+                wrapText: c <= 2,
+              },
+              border: bb,
+              font: {
+                name: "Calibri",
+                sz: 11,
+                bold: c <= 1,
+                color: isMissingCell
+                  ? { rgb: "B91C1C" }
+                  : isPlacedCell && complete
+                    ? { rgb: "166534" }
+                    : { rgb: "111111" },
+              },
+              fill: isMissingCell
+                ? { patternType: "solid", fgColor: { rgb: "FEF2F2" } }
+                : isPlacedCell && complete
+                  ? { patternType: "solid", fgColor: { rgb: "DCFCE7" } }
+                  : undefined,
+            };
+            if (!cs.fill) delete cs.fill;
+          }
+          (ws[addr] as { s?: unknown }).s = cs;
+        }
+      }
+
+      // Safe sheet name
+      const rawName =
+        cls.name
+          .replace(/[\\/?*[\]:]/g, "_")
+          .slice(0, 31)
+          .trim() || "Class";
+      let sheetName = rawName;
+      let n = 1;
+      while (
+        wb.SheetNames &&
+        wb.SheetNames.map((s: string) => s.toLowerCase()).includes(sheetName.toLowerCase())
+      ) {
+        const suffix = ` (${n++})`;
+        sheetName = rawName.slice(0, 31 - suffix.length) + suffix;
+      }
+      XLSXStyle.utils.book_append_sheet(wb, ws, sheetName);
+    });
+
+    XLSXStyle.writeFile(wb, `summary_report_${state.fromDate}_to_${state.toDate}.xlsx`);
+  };
+
   const exportFacultyExcel = () => {
     const refClass = activeClass || state.classes[0];
     if (!refClass) {
@@ -4163,6 +4725,13 @@ function Index() {
               >
                 👥 Faculties
               </button>
+              <button
+                onClick={() => setControlPanelOpen(true)}
+                className="border-2 border-[#7c3aed] bg-[#ede9fe] px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#7c3aed] transition-transform hover:bg-[#ddd6fe] active:translate-y-0.5"
+                title="Control panel: manage all classes & courses, toggle common, download timetables"
+              >
+                📋 Control Panel
+              </button>
               {conflictDetailsList.length > 0 && (
                 <button
                   onClick={() => setWarningsPanelOpen(true)}
@@ -5554,6 +6123,231 @@ function Index() {
                 </div>
               </button>
             ))
+          )}
+        </div>
+      </div>
+
+      {/* Control Panel Backdrop Overlay */}
+      {controlPanelOpen && (
+        <div
+          className="fixed inset-0 z-[90] bg-[#0d0d0d]/35 backdrop-blur-[2px]"
+          onClick={() => setControlPanelOpen(false)}
+        />
+      )}
+      {/* Control Panel Drawer */}
+      <div
+        className={`fixed right-0 top-0 h-full w-[min(600px,100vw)] bg-[#faf8ff] border-l-2 border-[#7c3aed] shadow-[0_0_50px_rgba(124,58,237,0.2)] z-[95] flex flex-col transition-transform duration-300 ease-in-out ${
+          controlPanelOpen ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b-2 border-[#7c3aed] bg-[#7c3aed] px-4 py-3 text-[#f5f3ee]">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-[#ede9fe]/60">
+              Download Manager
+            </div>
+            <div
+              className="text-sm font-bold"
+              style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+            >
+              📋 Control Panel
+            </div>
+          </div>
+          <button
+            onClick={() => setControlPanelOpen(false)}
+            className="border-2 border-[#ede9fe] bg-transparent px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-[#ede9fe] hover:bg-[#ede9fe] hover:text-[#7c3aed] transition"
+          >
+            Close
+          </button>
+        </div>
+
+        {/* Legend + global download */}
+        <div className="flex items-center flex-wrap gap-3 px-4 py-2 border-b border-[#7c3aed]/10 bg-[#ede9fe]/30">
+          <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-[#7c3aed]/60">
+            <span>📊</span> Class
+          </span>
+          <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-[#7c3aed]/60">
+            <span>📥</span> Course
+          </span>
+          <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-[#7c3aed]/60">
+            <span>👤</span> Faculty
+          </span>
+          <span className="text-[9px] italic font-normal text-[#7c3aed]/40">
+            Each: Summary + Timetable sheets
+          </span>
+          <button
+            onClick={() => exportSummaryReport()}
+            className="ml-auto shrink-0 flex items-center gap-1.5 border-2 border-[#7c3aed] bg-white px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#7c3aed] hover:bg-[#ede9fe] transition active:translate-y-0.5 shadow-[2px_2px_0_0_#7c3aed]"
+            title="Download a classwise summary report with LTPC, faculty, placed vs. total sessions"
+          >
+            📋 Download Summary
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {state.classes.length === 0 ? (
+            <div className="text-xs text-[#2d2d2d]/50 italic p-4 border-2 border-dashed border-[#7c3aed]/20 bg-white text-center">
+              No classes yet. Add a class to get started.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {state.classes.map((cls) => {
+                const isExpanded = expandedControlClass === cls.id;
+                return (
+                  <div
+                    key={cls.id}
+                    className="border border-[#7c3aed]/20 bg-white shadow-[2px_2px_0px_0px_rgba(124,58,237,0.12)]"
+                  >
+                    {/* Class row */}
+                    <div className="flex items-center gap-2 px-3 py-2 bg-[#ede9fe]/40 border-b border-[#7c3aed]/10">
+                      <button
+                        onClick={() => setExpandedControlClass(isExpanded ? null : cls.id)}
+                        className="min-w-0 flex-1 flex items-center gap-2 text-left"
+                      >
+                        <span className="text-[10px] text-[#7c3aed]/50 font-mono shrink-0">
+                          {isExpanded ? "▼" : "▶"}
+                        </span>
+                        <span
+                          className="text-xs font-bold text-[#2d2d2d] truncate"
+                          style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+                        >
+                          {cls.name}
+                        </span>
+                        <span className="text-[9px] text-[#2d2d2d]/40 font-normal shrink-0">
+                          ({cls.courses.length} course{cls.courses.length === 1 ? "" : "s"})
+                        </span>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          exportClassTimetable(cls);
+                        }}
+                        className="shrink-0 flex items-center gap-1 border border-[#7c3aed]/40 bg-[#ede9fe] px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-[#7c3aed] hover:bg-[#ddd6fe] transition active:translate-y-0.5"
+                        title="Download class timetable (Summary + Timetable)"
+                      >
+                        📊 Class
+                      </button>
+                    </div>
+
+                    {/* Courses list */}
+                    {isExpanded && (
+                      <div className="divide-y divide-[#7c3aed]/5">
+                        {cls.courses.length === 0 ? (
+                          <div className="px-4 py-3 text-[11px] text-[#2d2d2d]/40 italic">
+                            No courses in this class.
+                          </div>
+                        ) : (
+                          cls.courses.map((course) => {
+                            const courseFaculties = course.faculty
+                              ? course.faculty
+                                  .split(",")
+                                  .map((f) => f.trim())
+                                  .filter(Boolean)
+                              : [];
+                            const hasLTPC =
+                              (course.lectureHours ?? 0) +
+                                (course.tutorialHours ?? 0) +
+                                (course.practicalHours ?? 0) >
+                              0;
+                            return (
+                              <div
+                                key={course.id}
+                                className="flex items-start gap-2 px-3 py-2.5 hover:bg-[#faf8ff] transition"
+                              >
+                                {/* Color swatch */}
+                                <div
+                                  className="w-3 h-3 rounded-full shrink-0 mt-0.5 border border-[#0d0d0d]/10"
+                                  style={{ backgroundColor: course.color }}
+                                />
+                                {/* Info */}
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-[11px] font-bold text-[#2d2d2d] truncate">
+                                    {course.name}
+                                    {course.common && (
+                                      <span className="ml-1.5 text-[9px] font-bold text-[#0369a1] bg-[#e0f2fe] px-1 py-0.5 rounded">
+                                        Common
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[9px] text-[#2d2d2d]/50 truncate mt-0.5">
+                                    {course.faculty || <span className="italic">No faculty</span>}
+                                    {hasLTPC && (
+                                      <span className="ml-1.5 font-mono text-[#7c3aed]/70">
+                                        L{course.lectureHours ?? 0}T{course.tutorialHours ?? 0}P
+                                        {course.practicalHours ?? 0}C{course.credits ?? 0}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                {/* Common toggle */}
+                                <label
+                                  className="shrink-0 flex items-center gap-1 cursor-pointer mt-0.5"
+                                  title="Toggle as common / combined course across classes"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={!!course.common}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      setState((s) => ({
+                                        ...s,
+                                        classes: s.classes.map((cl) =>
+                                          cl.id === cls.id
+                                            ? {
+                                                ...cl,
+                                                courses: cl.courses.map((co) =>
+                                                  co.id === course.id
+                                                    ? { ...co, common: e.target.checked }
+                                                    : co,
+                                                ),
+                                              }
+                                            : cl,
+                                        ),
+                                      }));
+                                    }}
+                                    className="w-3 h-3 accent-[#7c3aed]"
+                                  />
+                                  <span className="text-[9px] font-bold uppercase tracking-wider text-[#7c3aed]/60">
+                                    Common
+                                  </span>
+                                </label>
+                                {/* Download buttons */}
+                                <div className="shrink-0 flex items-center gap-1 mt-0.5">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      exportCourseTimetable(cls, course);
+                                    }}
+                                    className="flex items-center gap-0.5 border border-[#0d0d0d]/20 bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#2d2d2d] hover:bg-[#e8e4dd] transition active:translate-y-0.5"
+                                    title="Download this course's timetable (Summary + Timetable)"
+                                  >
+                                    📥 Course
+                                  </button>
+                                  {courseFaculties.length > 0 && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        courseFaculties.forEach((f) => exportSingleFacultyExcel(f));
+                                      }}
+                                      className="flex items-center gap-0.5 border border-[#0369a1]/30 bg-[#e0f2fe] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#0369a1] hover:bg-[#bae6fd] transition active:translate-y-0.5"
+                                      title="Download faculty timetable for this course's instructor(s)"
+                                    >
+                                      👤 Faculty
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       </div>
