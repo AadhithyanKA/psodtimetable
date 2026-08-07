@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import XLSXStyle from "xlsx-js-style";
+import JSZip from "jszip";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -558,6 +559,7 @@ const normalizeStateSnapshot = (snapshot: SavedState): State => {
       name: cls.name || `Class ${String.fromCharCode(65 + index)}`,
       grid: cls.grid ?? {},
       courses: savedCourses,
+      department: typeof cls.department === "string" ? cls.department : undefined,
       fromDate: isValidIso(cls.fromDate) ? cls.fromDate : undefined,
       toDate: isValidIso(cls.toDate) ? cls.toDate : undefined,
     };
@@ -1445,6 +1447,7 @@ function Index() {
         name: `${original.name} (Copy)`,
         grid: JSON.parse(JSON.stringify(original.grid)),
         courses: original.courses.map((c) => ({ ...c })),
+        department: original.department,
         fromDate: original.fromDate,
         toDate: original.toDate,
       };
@@ -2826,12 +2829,10 @@ function Index() {
     XLSXStyle.writeFile(wb, `course_timetable_${cleanName}.xlsx`);
   };
 
-  const exportSingleFacultyExcel = (faculty: string) => {
+  const buildFacultyWorkbook = (faculty: string) => {
     const refClass = activeClass || state.classes[0];
-    if (!refClass) {
-      alert("No classes available to export.");
-      return;
-    }
+    if (!refClass) return null;
+
     const wb = XLSXStyle.utils.book_new();
     const hexClean = (h: string) =>
       (h || "").replace("#", "").padStart(6, "0").slice(-6).toUpperCase();
@@ -3000,7 +3001,478 @@ function Index() {
 
     XLSXStyle.utils.book_append_sheet(wb, ws, cleanName);
 
-    XLSXStyle.writeFile(wb, `faculty_timetable_${cleanName.replace(/\s+/g, "_")}.xlsx`);
+    const filename = `faculty_timetable_${cleanName.replace(/\s+/g, "_")}.xlsx`;
+    return { wb, filename };
+  };
+
+  const exportSingleFacultyExcel = (faculty: string) => {
+    const res = buildFacultyWorkbook(faculty);
+    if (!res) {
+      alert("No classes available to export.");
+      return;
+    }
+    XLSXStyle.writeFile(res.wb, res.filename);
+  };
+
+  const exportAllFacultiesZip = async () => {
+    const faculties = new Set<string>();
+    state.classes.forEach((cls) => {
+      cls.courses.forEach((c) => {
+        if (c.faculty) {
+          c.faculty
+            .split(",")
+            .map((f) => f.trim())
+            .filter(Boolean)
+            .forEach((f) => faculties.add(f));
+        }
+      });
+    });
+    const facList = Array.from(faculties).sort();
+
+    if (facList.length === 0) {
+      alert("No faculties found in any class to export.");
+      return;
+    }
+
+    const zip = new JSZip();
+    facList.forEach((faculty) => {
+      const res = buildFacultyWorkbook(faculty);
+      if (res) {
+        const wbout = XLSXStyle.write(res.wb, { bookType: "xlsx", type: "array" });
+        zip.file(res.filename, wbout);
+      }
+    });
+
+    const content = await zip.generateAsync({ type: "blob" });
+    const url = URL.createObjectURL(content);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `all_faculties_timetables_${state.fromDate}_to_${state.toDate}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Export School Workload sheet
+  const exportSchoolWorkload = () => {
+    if (state.classes.length === 0) {
+      alert("No classes to export.");
+      return;
+    }
+    const wb = XLSXStyle.utils.book_new();
+    const bdr = { style: "thin", color: { rgb: "CCCCCC" } } as const;
+    const bb = { top: bdr, bottom: bdr, left: bdr, right: bdr };
+
+    const parseCourseCodeAndName = (fullName: string) => {
+      const trimmed = (fullName || "").trim();
+      const m = trimmed.match(/^([A-Za-z0-9]+(?:\s*[0-9]+)?)\s*[\s–—:-]\s*(.+)$/);
+      if (m) {
+        return { code: m[1].trim(), name: m[2].trim() };
+      }
+      const parts = trimmed.split(/\s+/);
+      if (parts.length > 1 && /^[A-Za-z0-9]+$/.test(parts[0])) {
+        return { code: parts[0], name: parts.slice(1).join(" ") };
+      }
+      return { code: trimmed, name: trimmed };
+    };
+
+    const workingDates = daysBetween(state.fromDate, state.toDate);
+    const dateHeaders = workingDates.map((d) => {
+      const { weekday, date: dstr } = dayLabel(d);
+      return `${weekday} ${dstr}`;
+    });
+
+    const HEADER = [
+      "#",
+      "Class",
+      "Course Code",
+      "Course Name",
+      "Faculty",
+      "L",
+      "T",
+      "P",
+      "C",
+      "Starting Date",
+      "Ending Date",
+      ...dateHeaders,
+    ];
+
+    const META_COL_COUNT = 11;
+
+    const rows: (string | number)[][] = [HEADER];
+    type CellMeta =
+      | { type: "inactive" }
+      | { type: "free" }
+      | { type: "partial"; freeHours: string }
+      | { type: "blocked" };
+
+    const rowMetaList: CellMeta[][] = [];
+    let globalIdx = 0;
+
+    const nonBreakSlots = state.slots
+      .map((sl, idx) => ({ sl, idx, pNum: periodNumberFor(idx) }))
+      .filter((s) => !s.sl.isBreak);
+    const totalNonBreak = nonBreakSlots.length;
+
+    state.classes.forEach((cls) => {
+      const clsState = stateForClass(cls, state);
+      cls.courses.forEach((course) => {
+        globalIdx++;
+        const L = Math.max(0, course.lectureHours ?? 0);
+        const T = Math.max(0, course.tutorialHours ?? 0);
+        const P = Math.max(0, course.practicalHours ?? 0);
+        const C = Math.max(0, course.credits ?? 0);
+
+        const range = effectiveCourseRange(course, clsState);
+        const startDate = range?.from || clsState.fromDate;
+        const endDate = range?.to || clsState.toDate;
+
+        const { code, name: courseName } = parseCourseCodeAndName(course.name);
+        const facName = course.faculty || "";
+
+        const row: (string | number)[] = [
+          globalIdx,
+          cls.name,
+          code,
+          courseName,
+          facName,
+          L,
+          T,
+          P,
+          C,
+          startDate,
+          endDate,
+        ];
+
+        const rowCellMeta: CellMeta[] = [];
+
+        workingDates.forEach((date) => {
+          if (date < startDate || date > endDate || course.disabled) {
+            row.push("-");
+            rowCellMeta.push({ type: "inactive" });
+            return;
+          }
+
+          if (!facName) {
+            row.push("Free");
+            rowCellMeta.push({ type: "free" });
+            return;
+          }
+
+          // Check free periods for faculty on this date across all classes
+          const facLower = facName.toLowerCase();
+          const facNames = facLower
+            .split(",")
+            .map((f) => f.trim())
+            .filter(Boolean);
+
+          const freePNums: number[] = [];
+
+          nonBreakSlots.forEach(({ idx: slotIdx, pNum }) => {
+            let isBusy = false;
+            for (const c of state.classes) {
+              const cell = c.grid[`${date}-${slotIdx}`];
+              if (cell?.kind === "course") {
+                const crs = c.courses.find((x) => x.id === cell.courseId);
+                if (crs && crs.faculty) {
+                  const names = crs.faculty.split(",").map((f) => f.trim().toLowerCase());
+                  if (facNames.some((fn) => names.includes(fn))) {
+                    isBusy = true;
+                    break;
+                  }
+                }
+              }
+            }
+            if (!isBusy) {
+              freePNums.push(pNum);
+            }
+          });
+
+          if (freePNums.length === totalNonBreak) {
+            row.push("Free");
+            rowCellMeta.push({ type: "free" });
+          } else if (freePNums.length > 0) {
+            const freeHoursStr = freePNums.join(", ");
+            row.push(freeHoursStr);
+            rowCellMeta.push({ type: "partial", freeHours: freeHoursStr });
+          } else {
+            row.push("Blocked");
+            rowCellMeta.push({ type: "blocked" });
+          }
+        });
+
+        rows.push(row);
+        rowMetaList.push(rowCellMeta);
+      });
+    });
+
+    const ws = XLSXStyle.utils.aoa_to_sheet(rows);
+    const numCols = HEADER.length;
+
+    const metaWidths = [5, 20, 16, 26, 20, 5, 5, 5, 5, 12, 12];
+    const dateWidths = workingDates.map(() => 14);
+
+    (ws as unknown as Record<string, unknown>)["!cols"] = [
+      ...metaWidths.map((wch) => ({ wch })),
+      ...dateWidths.map((wch) => ({ wch })),
+    ];
+    (ws as unknown as Record<string, unknown>)["!rows"] = rows.map((_, i) => ({
+      hpt: i === 0 ? 26 : 22,
+    }));
+    (ws as unknown as Record<string, unknown>)["!freeze"] = { xSplit: META_COL_COUNT, ySplit: 1 };
+
+    const headerStyle: Record<string, unknown> = {
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border: bb,
+      font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } },
+      fill: { patternType: "solid", fgColor: { rgb: "0D0D0D" } },
+    };
+
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < numCols; c++) {
+        const addr = XLSXStyle.utils.encode_cell({ r, c });
+        if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+        let cs: Record<string, unknown>;
+
+        if (r === 0) {
+          cs = headerStyle;
+        } else {
+          if (c < META_COL_COUNT) {
+            cs = {
+              alignment: {
+                horizontal: c === 0 || (c >= 5 && c <= 10) ? "center" : "left",
+                vertical: "center",
+                wrapText: c === 3 || c === 4,
+              },
+              border: bb,
+              font: {
+                name: "Calibri",
+                sz: 11,
+                bold: c <= 3,
+                color: { rgb: "111111" },
+              },
+            };
+          } else {
+            const dateColIdx = c - META_COL_COUNT;
+            const meta = rowMetaList[r - 1]?.[dateColIdx];
+
+            if (meta?.type === "free") {
+              cs = {
+                alignment: { horizontal: "center", vertical: "center" },
+                border: bb,
+                font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "166534" } },
+                fill: { patternType: "solid", fgColor: { rgb: "DCFCE7" } },
+              };
+            } else if (meta?.type === "partial") {
+              cs = {
+                alignment: { horizontal: "center", vertical: "center" },
+                border: bb,
+                font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "991B1B" } },
+                fill: { patternType: "solid", fgColor: { rgb: "FEE2E2" } },
+              };
+            } else if (meta?.type === "blocked") {
+              cs = {
+                alignment: { horizontal: "center", vertical: "center" },
+                border: bb,
+                font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "7F1D1D" } },
+                fill: { patternType: "solid", fgColor: { rgb: "FECACA" } },
+              };
+            } else {
+              // inactive date
+              cs = {
+                alignment: { horizontal: "center", vertical: "center" },
+                border: bb,
+                font: { name: "Calibri", sz: 11, color: { rgb: "9CA3AF" } },
+                fill: { patternType: "solid", fgColor: { rgb: "F3F4F6" } },
+              };
+            }
+          }
+        }
+        (ws[addr] as { s?: unknown }).s = cs;
+      }
+    }
+
+    XLSXStyle.utils.book_append_sheet(wb, ws, "School Workload");
+    XLSXStyle.writeFile(wb, `school_workload_${state.fromDate}_to_${state.toDate}.xlsx`);
+  };
+
+  // Export School Faculty Workload Summary sheet
+  const exportFacultyWorkloadSummary = () => {
+    const faculties = new Set<string>();
+    state.classes.forEach((cls) => {
+      cls.courses.forEach((c) => {
+        if (c.faculty) {
+          c.faculty
+            .split(",")
+            .map((f) => f.trim())
+            .filter(Boolean)
+            .forEach((f) => faculties.add(f));
+        }
+      });
+    });
+    const facList = Array.from(faculties).sort();
+
+    if (facList.length === 0) {
+      alert("No faculties found to export.");
+      return;
+    }
+
+    const wb = XLSXStyle.utils.book_new();
+    const bdr = { style: "thin", color: { rgb: "CCCCCC" } } as const;
+    const bb = { top: bdr, bottom: bdr, left: bdr, right: bdr };
+
+    const workingDates = daysBetween(state.fromDate, state.toDate);
+    const dateHeaders = workingDates.map((d) => {
+      const { weekday, date: dstr } = dayLabel(d);
+      return `${weekday} ${dstr}`;
+    });
+
+    const HEADER = ["#", "Faculty Name", ...dateHeaders];
+    const META_COL_COUNT = 2;
+
+    const rows: (string | number)[][] = [HEADER];
+    type CellMeta = { type: "free" } | { type: "partial"; freeHours: string } | { type: "blocked" };
+
+    const rowMetaList: CellMeta[][] = [];
+
+    const nonBreakSlots = state.slots
+      .map((sl, idx) => ({ sl, idx, pNum: periodNumberFor(idx) }))
+      .filter((s) => !s.sl.isBreak);
+    const totalNonBreak = nonBreakSlots.length;
+
+    facList.forEach((facName, idx) => {
+      const facLower = facName.toLowerCase();
+      const facNames = facLower
+        .split(",")
+        .map((f) => f.trim())
+        .filter(Boolean);
+
+      const row: (string | number)[] = [idx + 1, facName];
+      const rowCellMeta: CellMeta[] = [];
+
+      workingDates.forEach((date) => {
+        const freePNums: number[] = [];
+
+        nonBreakSlots.forEach(({ idx: slotIdx, pNum }) => {
+          let isBusy = false;
+          for (const c of state.classes) {
+            const cell = c.grid[`${date}-${slotIdx}`];
+            if (cell?.kind === "course") {
+              const crs = c.courses.find((x) => x.id === cell.courseId);
+              if (crs && crs.faculty) {
+                const names = crs.faculty.split(",").map((f) => f.trim().toLowerCase());
+                if (facNames.some((fn) => names.includes(fn))) {
+                  isBusy = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (!isBusy) {
+            freePNums.push(pNum);
+          }
+        });
+
+        if (freePNums.length === totalNonBreak) {
+          const freeHoursStr = freePNums.join(", ");
+          row.push(freeHoursStr);
+          rowCellMeta.push({ type: "free" });
+        } else if (freePNums.length > 0) {
+          const freeHoursStr = freePNums.join(", ");
+          row.push(freeHoursStr);
+          rowCellMeta.push({ type: "partial", freeHours: freeHoursStr });
+        } else {
+          row.push("None");
+          rowCellMeta.push({ type: "blocked" });
+        }
+      });
+
+      rows.push(row);
+      rowMetaList.push(rowCellMeta);
+    });
+
+    const ws = XLSXStyle.utils.aoa_to_sheet(rows);
+    const numCols = HEADER.length;
+
+    const metaWidths = [5, 24];
+    const dateWidths = workingDates.map(() => 14);
+
+    (ws as unknown as Record<string, unknown>)["!cols"] = [
+      ...metaWidths.map((wch) => ({ wch })),
+      ...dateWidths.map((wch) => ({ wch })),
+    ];
+    (ws as unknown as Record<string, unknown>)["!rows"] = rows.map((_, i) => ({
+      hpt: i === 0 ? 26 : 22,
+    }));
+    (ws as unknown as Record<string, unknown>)["!freeze"] = { xSplit: META_COL_COUNT, ySplit: 1 };
+
+    const headerStyle: Record<string, unknown> = {
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border: bb,
+      font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } },
+      fill: { patternType: "solid", fgColor: { rgb: "0D0D0D" } },
+    };
+
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < numCols; c++) {
+        const addr = XLSXStyle.utils.encode_cell({ r, c });
+        if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+        let cs: Record<string, unknown>;
+
+        if (r === 0) {
+          cs = headerStyle;
+        } else {
+          if (c < META_COL_COUNT) {
+            cs = {
+              alignment: {
+                horizontal: c === 0 ? "center" : "left",
+                vertical: "center",
+              },
+              border: bb,
+              font: {
+                name: "Calibri",
+                sz: 11,
+                bold: c === 1,
+                color: { rgb: "111111" },
+              },
+            };
+          } else {
+            const dateColIdx = c - META_COL_COUNT;
+            const meta = rowMetaList[r - 1]?.[dateColIdx];
+
+            if (meta?.type === "free") {
+              cs = {
+                alignment: { horizontal: "center", vertical: "center" },
+                border: bb,
+                font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "166534" } },
+                fill: { patternType: "solid", fgColor: { rgb: "DCFCE7" } },
+              };
+            } else if (meta?.type === "partial") {
+              cs = {
+                alignment: { horizontal: "center", vertical: "center" },
+                border: bb,
+                font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "991B1B" } },
+                fill: { patternType: "solid", fgColor: { rgb: "FEE2E2" } },
+              };
+            } else {
+              // blocked / 0 free hours
+              cs = {
+                alignment: { horizontal: "center", vertical: "center" },
+                border: bb,
+                font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "7F1D1D" } },
+                fill: { patternType: "solid", fgColor: { rgb: "FECACA" } },
+              };
+            }
+          }
+        }
+        (ws[addr] as { s?: unknown }).s = cs;
+      }
+    }
+
+    XLSXStyle.utils.book_append_sheet(wb, ws, "Faculty Workload Summary");
+    XLSXStyle.writeFile(
+      wb,
+      `school_faculty_workload_summary_${state.fromDate}_to_${state.toDate}.xlsx`,
+    );
   };
 
   // Export a classwise summary report: one sheet per class, listing all courses
@@ -6205,6 +6677,27 @@ function Index() {
             title="Download a classwise summary report with LTPC, faculty, placed vs. total sessions"
           >
             📋 Download Summary
+          </button>
+          <button
+            onClick={() => exportAllFacultiesZip()}
+            className="shrink-0 flex items-center gap-1.5 border-2 border-[#0369a1] bg-[#e0f2fe] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#0369a1] hover:bg-[#bae6fd] transition active:translate-y-0.5 shadow-[2px_2px_0_0_#0369a1]"
+            title="Generate individual Excel files for all faculties and download them as a ZIP archive"
+          >
+            📦 Download All Faculties (ZIP)
+          </button>
+          <button
+            onClick={() => exportSchoolWorkload()}
+            className="shrink-0 flex items-center gap-1.5 border-2 border-[#15803d] bg-[#dcfce7] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#15803d] hover:bg-[#bbf7d0] transition active:translate-y-0.5 shadow-[2px_2px_0_0_#15803d]"
+            title="Download School Workload matrix showing course details, dates, and faculty free hours on occupied dates"
+          >
+            🏫 School Workload
+          </button>
+          <button
+            onClick={() => exportFacultyWorkloadSummary()}
+            className="shrink-0 flex items-center gap-1.5 border-2 border-[#b45309] bg-[#fef3c7] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#b45309] hover:bg-[#fde68a] transition active:translate-y-0.5 shadow-[2px_2px_0_0_#b45309]"
+            title="Download School Faculty Workload Summary matrix showing free hour numbers for each faculty member across all dates"
+          >
+            👨‍🏫 Faculty Workload Summary
           </button>
         </div>
 
