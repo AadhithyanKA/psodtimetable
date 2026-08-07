@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import XLSXStyle from "xlsx-js-style";
 
@@ -38,6 +38,9 @@ type Course = {
   classroom?: string;
   color: string;
   durationSlots: number;
+  minDurationSlots?: number;
+  maxDurationSlots?: number;
+  stretchRuleEnabled?: boolean;
   // Target number of sessions per week (used by auto-fill). 0 = don't auto-fill.
   weeklyPeriods?: number;
   // LTPC structure. When any of L/T/P > 0 the weekly session target is
@@ -64,6 +67,8 @@ type Course = {
   toDate?: string; // YYYY-MM-DD
   // When true, the course is skipped by Fill by Rules / auto-populate.
   disabled?: boolean;
+  // When true, the course is a common/combined subject across classes.
+  common?: boolean;
 };
 type ClassData = {
   id: string;
@@ -120,18 +125,74 @@ type State = {
   // When true, the timetable is locked: no edits, no auto-fill, and
   // conflict/override warnings are suppressed so overrides become permanent.
   frozen?: boolean;
+  ignoredConflicts?: string[]; // keys of conflicts ignored by the user
 };
 
 const COLORS = [
-  "#fdba74",
-  "#fcd34d",
-  "#86efac",
-  "#67e8f9",
-  "#93c5fd",
-  "#c4b5fd",
-  "#f9a8d4",
-  "#a7f3d0",
+  "#fdba74", // Peach
+  "#fcd34d", // Soft Gold
+  "#86efac", // Light Emerald
+  "#67e8f9", // Pale Cyan
+  "#93c5fd", // Sky Blue
+  "#c4b5fd", // Soft Lavender
+  "#f9a8d4", // Pink Rose
+  "#a7f3d0", // Light Mint
+  "#fca5a5", // Coral Red
+  "#fed7aa", // Apricot
+  "#fef08a", // Pale Yellow
+  "#bbf7d0", // Soft Mint
+  "#99f6e4", // Light Aquamarine
+  "#bfdbfe", // Soft Sky
+  "#e9d5ff", // Soft Lilac
+  "#fbcfe8", // Pale Rose
+  "#cbd5e1", // Pale Slate
+  "#ddd6fe", // Lavender Mist
+  "#fda4af", // Soft Salmon
+  "#e2e8f0", // Soft Gray
 ];
+
+const hslToHex = (hslStr: string): string => {
+  const match = hslStr.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+  if (!match) return "#cccccc";
+  const h = parseInt(match[1], 10) / 360;
+  const s = parseInt(match[2], 10) / 100;
+  const l = parseInt(match[3], 10) / 100;
+  let r, g, b;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const hue2rgb = (p: number, q: number, t: number) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1 / 3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1 / 3);
+  }
+  const toHex = (x: number) =>
+    Math.round(x * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+};
+
+const getUniqueCourseColor = (existingCourses: Course[]): string => {
+  const used = new Set((existingCourses || []).map((c) => c.color.toLowerCase()));
+  for (const color of COLORS) {
+    if (!used.has(color.toLowerCase())) {
+      return color;
+    }
+  }
+  // Golden Angle (137.5 deg) distribution for distinct pastel HSL colors
+  const hue = ((existingCourses || []).length * 137.5) % 360;
+  return `hsl(${Math.round(hue)}, 75%, 85%)`;
+};
 const STORAGE_KEY = "timetable-maker-v5";
 const INITIAL_FROM_DATE = "2026-07-25";
 
@@ -304,6 +365,7 @@ function defaultState(from = isoToday()): State {
       { id: "k1", name: "Class A", grid: mkGrid(), courses: cloneCourses() },
       { id: "k2", name: "Class B", grid: mkGrid(), courses: cloneCourses() },
     ],
+    ignoredConflicts: [],
   };
 }
 
@@ -409,8 +471,10 @@ const isValidIso = (s: unknown): s is string =>
 const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
   const { allowedPeriods, ...rest } = course;
   const rawAllowedSlots = rest.allowedSlots ?? allowedPeriods ?? [];
-  const validSlotIdx = (idx: unknown) =>
-    typeof idx === "number" && idx >= 0 && idx < slots.length && !slots[idx].isBreak;
+  const validSlotIdx = (idx: unknown) => {
+    const num = parseInt(String(idx), 10);
+    return !Number.isNaN(num) && num >= 0 && num < slots.length && !slots[num].isBreak;
+  };
   let allowedByWd: Record<number, number[]> | undefined;
   const rawByWd = (rest as { allowedSlotsByWeekday?: unknown }).allowedSlotsByWeekday;
   if (rawByWd && typeof rawByWd === "object") {
@@ -419,7 +483,9 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
       const wd = parseInt(k, 10);
       if (wd < 0 || wd > 6 || Number.isNaN(wd)) continue;
       if (!Array.isArray(v)) continue;
-      out[wd] = (v as unknown[]).filter(validSlotIdx) as number[];
+      out[wd] = (v as unknown[])
+        .map((idx) => parseInt(String(idx), 10))
+        .filter(validSlotIdx) as number[];
     }
     if (Object.keys(out).length > 0) allowedByWd = out;
   }
@@ -430,8 +496,24 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
     faculty: rest.faculty || "Faculty",
     classroom: typeof rest.classroom === "string" ? rest.classroom : "",
     disabled: rest.disabled === true ? true : undefined,
+    common: rest.common === true ? true : undefined,
     color: rest.color || COLORS[0],
     durationSlots: cleanDurationSlots(rest.durationSlots, slots),
+    minDurationSlots:
+      (rest as { minDurationSlots?: unknown }).minDurationSlots !== undefined
+        ? Math.max(
+            1,
+            parseInt(String((rest as { minDurationSlots?: unknown }).minDurationSlots), 10),
+          )
+        : undefined,
+    maxDurationSlots:
+      (rest as { maxDurationSlots?: unknown }).maxDurationSlots !== undefined
+        ? Math.max(
+            1,
+            parseInt(String((rest as { maxDurationSlots?: unknown }).maxDurationSlots), 10),
+          )
+        : undefined,
+    stretchRuleEnabled: (rest as { stretchRuleEnabled?: unknown }).stretchRuleEnabled !== false,
     weeklyPeriods: Math.max(0, Math.floor(rest.weeklyPeriods ?? 0)),
     lectureHours: Math.max(0, Math.floor(rest.lectureHours ?? 0)) || undefined,
     tutorialHours: Math.max(0, Math.floor(rest.tutorialHours ?? 0)) || undefined,
@@ -444,10 +526,10 @@ const cleanCourse = (course: LegacyCourse, slots: Slot[]): Course => {
       const n = Math.max(0, Math.floor(rest.totalSessions));
       return n > 0 ? n : undefined;
     })(),
-    allowedWeekdays: (rest.allowedWeekdays ?? []).filter((day) => day >= 0 && day <= 6),
-    allowedSlots: rawAllowedSlots.filter(
-      (idx) => idx >= 0 && idx < slots.length && !slots[idx].isBreak,
-    ),
+    allowedWeekdays: (rest.allowedWeekdays ?? [])
+      .map((day) => parseInt(String(day), 10))
+      .filter((day) => !Number.isNaN(day) && day >= 0 && day <= 6),
+    allowedSlots: rawAllowedSlots.map((idx) => parseInt(String(idx), 10)).filter(validSlotIdx),
     allowedSlotsByWeekday: allowedByWd,
     fromDate: isValidIso(rest.fromDate) ? rest.fromDate : undefined,
     toDate: isValidIso(rest.toDate) ? rest.toDate : undefined,
@@ -484,7 +566,26 @@ const normalizeStateSnapshot = (snapshot: SavedState): State => {
     slots,
     classes,
     frozen: Boolean(snapshot.frozen),
+    ignoredConflicts: Array.isArray(snapshot.ignoredConflicts) ? snapshot.ignoredConflicts : [],
   };
+};
+
+const countCoursePeriodsInDates = (
+  grid: Record<string, Cell>,
+  course: Course,
+  slots: Slot[],
+  dateList: string[],
+): number => {
+  let count = 0;
+  dateList.forEach((date) => {
+    for (let i = 0; i < slots.length; i++) {
+      const cell = grid[`${date}-${i}`];
+      if (cell?.kind === "course" && cell.courseId === course.id) {
+        count++;
+      }
+    }
+  });
+  return count;
 };
 
 const countCourseSessionsInDates = (
@@ -494,7 +595,6 @@ const countCourseSessionsInDates = (
   dateList: string[],
   onStart?: (date: string, slotIdx: number) => void,
 ): number => {
-  const span = cleanDurationSlots(course.durationSlots, slots);
   let count = 0;
   dateList.forEach((date) => {
     let slotIdx = 0;
@@ -504,30 +604,58 @@ const countCourseSessionsInDates = (
         slotIdx++;
         continue;
       }
-      let hasFullSpan = true;
-      for (let i = 0; i < span; i++) {
-        const idx = slotIdx + i;
-        const part = grid[`${date}-${idx}`];
-        if (
-          idx >= slots.length ||
-          slots[idx]?.isBreak ||
-          part?.kind !== "course" ||
-          part.courseId !== course.id
-        ) {
-          hasFullSpan = false;
+      // Found start of a contiguous block
+      count++;
+      onStart?.(date, slotIdx);
+
+      // Skip the rest of this contiguous block
+      while (slotIdx < slots.length) {
+        const nextCell = grid[`${date}-${slotIdx}`];
+        if (nextCell?.kind === "course" && nextCell.courseId === course.id) {
+          slotIdx++;
+        } else {
           break;
         }
       }
-      if (!hasFullSpan) {
-        slotIdx++;
-        continue;
-      }
-      count++;
-      onStart?.(date, slotIdx);
-      slotIdx += span;
     }
   });
   return count;
+};
+
+const courseMinStretch = (course: Course): number => {
+  return course.minDurationSlots ?? course.durationSlots ?? 1;
+};
+
+const courseMaxStretch = (course: Course): number => {
+  return course.maxDurationSlots ?? course.durationSlots ?? 1;
+};
+
+const courseBlockFitsRules = (
+  grid: Record<string, Cell>,
+  course: Course,
+  slots: Slot[],
+  date: string,
+  start: number,
+  actualLength: number,
+): boolean => {
+  if (!courseAllowedOn(course, date)) return false;
+  if (course.stretchRuleEnabled === false) {
+    for (let i = 0; i < actualLength; i++) {
+      const idx = start + i;
+      if (idx >= slots.length || slots[idx]?.isBreak) return false;
+      if (!courseAllowedSlotOn(course, idx, date)) return false;
+    }
+    return true;
+  }
+  const min = courseMinStretch(course);
+  const max = courseMaxStretch(course);
+  if (actualLength < min || actualLength > max) return false;
+  for (let i = 0; i < actualLength; i++) {
+    const idx = start + i;
+    if (idx >= slots.length || slots[idx]?.isBreak) return false;
+    if (!courseAllowedSlotOn(course, idx, date)) return false;
+  }
+  return true;
 };
 
 const courseSpanFitsRules = (
@@ -537,7 +665,19 @@ const courseSpanFitsRules = (
   start: number,
 ): boolean => {
   if (!courseAllowedOn(course, date)) return false;
+  if (course.stretchRuleEnabled === false) {
+    const span = cleanDurationSlots(course.durationSlots, slots);
+    for (let i = 0; i < span; i++) {
+      const idx = start + i;
+      if (idx >= slots.length || slots[idx]?.isBreak) return false;
+      if (!courseAllowedSlotOn(course, idx, date)) return false;
+    }
+    return true;
+  }
+  const min = courseMinStretch(course);
+  const max = courseMaxStretch(course);
   const span = cleanDurationSlots(course.durationSlots, slots);
+  if (span < min || span > max) return false;
   for (let i = 0; i < span; i++) {
     const idx = start + i;
     if (idx >= slots.length || slots[idx]?.isBreak) return false;
@@ -580,7 +720,32 @@ type Tool =
   | { kind: "erase" };
 
 function Index() {
-  const [state, setState] = useState<State>(() => defaultState(INITIAL_FROM_DATE));
+  const [state, rawSetState] = useState<State>(() => defaultState(INITIAL_FROM_DATE));
+  const [past, setPast] = useState<State[]>([]);
+  const [future, setFuture] = useState<State[]>([]);
+  const dragStartStateRef = useRef<State | null>(null);
+
+  const setState = useCallback(
+    (updater: State | ((prev: State) => State), isIntermediate = false) => {
+      rawSetState((current) => {
+        const next = typeof updater === "function" ? updater(current) : updater;
+        if (JSON.stringify(current) !== JSON.stringify(next)) {
+          if (!isIntermediate) {
+            setPast((p) => {
+              const updated = [...p, current];
+              if (updated.length > 5) {
+                updated.shift();
+              }
+              return updated;
+            });
+            setFuture([]);
+          }
+        }
+        return next;
+      });
+    },
+    [],
+  );
   const [activeClassId, setActiveClassId] = useState("k1");
   const [hydrated, setHydrated] = useState(false);
   const [picker, setPicker] = useState<{ date: string; slotIdx: number } | null>(null);
@@ -599,6 +764,20 @@ function Index() {
   );
   const [blockReport, setBlockReport] = useState<string>("");
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
+  const [courseContextMenu, setCourseContextMenu] = useState<{
+    courseId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [classContextMenu, setClassContextMenu] = useState<{
+    classId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [facultyPanelOpen, setFacultyPanelOpen] = useState(false);
+  const [selectedFaculty, setSelectedFaculty] = useState<string | null>(null);
+  const [editingFaculty, setEditingFaculty] = useState<string | null>(null);
+  const [facultyEditVal, setFacultyEditVal] = useState("");
   const gridRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const adminInputRef = useRef<HTMLInputElement>(null);
@@ -673,10 +852,109 @@ function Index() {
       slots: s.slots.map((sl, idx) => (idx === i ? { ...sl, isBreak: !sl.isBreak } : sl)),
     }));
 
+  const undo = useCallback(() => {
+    setPast((p) => {
+      if (p.length === 0) return p;
+      const prev = p[p.length - 1];
+      const newPast = p.slice(0, -1);
+      rawSetState((current) => {
+        setFuture((f) => {
+          const updated = [current, ...f];
+          if (updated.length > 5) {
+            updated.pop();
+          }
+          return updated;
+        });
+        return prev;
+      });
+      return newPast;
+    });
+  }, []);
+
+  const redo = useCallback(() => {
+    setFuture((f) => {
+      if (f.length === 0) return f;
+      const next = f[0];
+      const newFuture = f.slice(1);
+      rawSetState((current) => {
+        setPast((p) => {
+          const updated = [...p, current];
+          if (updated.length > 5) {
+            updated.shift();
+          }
+          return updated;
+        });
+        return next;
+      });
+      return newFuture;
+    });
+  }, []);
+
   useEffect(() => {
-    const up = () => setIsPainting(false);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl &&
+        (activeEl.tagName === "INPUT" ||
+          activeEl.tagName === "TEXTAREA" ||
+          activeEl.getAttribute("contenteditable") === "true");
+
+      if (isInput) return;
+
+      const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+      const isCmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+
+      if (isCmdOrCtrl) {
+        if (e.key.toLowerCase() === "z") {
+          e.preventDefault();
+          undo();
+        } else if (e.key.toLowerCase() === "r" || e.key.toLowerCase() === "y") {
+          e.preventDefault();
+          redo();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [undo, redo]);
+
+  useEffect(() => {
+    const up = () => {
+      setIsPainting(false);
+      if (dragStartStateRef.current) {
+        const initial = dragStartStateRef.current;
+        dragStartStateRef.current = null;
+        rawSetState((current) => {
+          if (JSON.stringify(initial) !== JSON.stringify(current)) {
+            setPast((p) => {
+              const updated = [...p, initial];
+              if (updated.length > 5) {
+                updated.shift();
+              }
+              return updated;
+            });
+            setFuture([]);
+          }
+          return current;
+        });
+      }
+    };
     window.addEventListener("mouseup", up);
     return () => window.removeEventListener("mouseup", up);
+  }, []);
+
+  useEffect(() => {
+    const dismiss = () => {
+      setCourseContextMenu(null);
+      setClassContextMenu(null);
+    };
+    window.addEventListener("click", dismiss);
+    window.addEventListener("contextmenu", dismiss);
+    return () => {
+      window.removeEventListener("click", dismiss);
+      window.removeEventListener("contextmenu", dismiss);
+    };
   }, []);
 
   const activeClass = state.classes.find((c) => c.id === activeClassId) ?? state.classes[0];
@@ -732,24 +1010,49 @@ function Index() {
     allDates.forEach((date) => {
       state.slots.forEach((_, i) => {
         const key = `${date}-${i}`;
-        const facultyToClass: Record<string, string[]> = {};
+        const facultyToAssignments: Record<string, Array<{ classId: string; course: Course }>> = {};
         state.classes.forEach((cls) => {
           const cell = cls.grid[key];
           if (cell?.kind === "course") {
             const course = cls.courses.find((c) => c.id === cell.courseId);
             if (!course) return;
             getFaculties(course).forEach((f) => {
-              (facultyToClass[f] ??= []).push(cls.id);
+              (facultyToAssignments[f] ??= []).push({ classId: cls.id, course });
             });
             // Rule violation: course placed on a weekday or period it isn't allowed
             if (!courseAllowedOn(course, date) || !courseAllowedSlotOn(course, i, date)) {
-              set.add(`${cls.id}:${key}`);
+              const keyStr = `${cls.id}:${key}`;
+              if (!state.ignoredConflicts?.includes(keyStr)) {
+                set.add(keyStr);
+              }
             }
           }
         });
-        Object.values(facultyToClass).forEach((clsIds) => {
-          const unique = Array.from(new Set(clsIds));
-          if (unique.length > 1) unique.forEach((id) => set.add(`${id}:${key}`));
+
+        Object.entries(facultyToAssignments).forEach(([_, assignments]) => {
+          for (let aIdx = 0; aIdx < assignments.length; aIdx++) {
+            for (let bIdx = aIdx + 1; bIdx < assignments.length; bIdx++) {
+              const a = assignments[aIdx];
+              const b = assignments[bIdx];
+              if (a.classId !== b.classId) {
+                const isSameCommonCourse =
+                  a.course.common &&
+                  b.course.common &&
+                  a.course.name.toLowerCase().trim() === b.course.name.toLowerCase().trim();
+
+                if (!isSameCommonCourse) {
+                  const keyStrA = `${a.classId}:${key}`;
+                  const keyStrB = `${b.classId}:${key}`;
+                  if (!state.ignoredConflicts?.includes(keyStrA)) {
+                    set.add(keyStrA);
+                  }
+                  if (!state.ignoredConflicts?.includes(keyStrB)) {
+                    set.add(keyStrB);
+                  }
+                }
+              }
+            }
+          }
         });
       });
     });
@@ -785,9 +1088,9 @@ function Index() {
       const dayName = WEEKDAY_FULL[dayOfWeek];
       state.slots.forEach((_, i) => {
         const key = `${date}-${i}`;
-        const facultyToClass: Record<
+        const facultyToAssignments: Record<
           string,
-          Array<{ classId: string; className: string; courseName: string }>
+          Array<{ classId: string; className: string; course: Course }>
         > = {};
 
         state.classes.forEach((cls) => {
@@ -797,54 +1100,69 @@ function Index() {
             if (!course) return;
 
             getFaculties(course).forEach((f) => {
-              (facultyToClass[f] ??= []).push({
+              (facultyToAssignments[f] ??= []).push({
                 classId: cls.id,
                 className: cls.name,
-                courseName: course.name || course.id,
+                course,
               });
             });
 
             // Rule violation
             if (!courseAllowedOn(course, date) || !courseAllowedSlotOn(course, i, date)) {
-              list.push({
-                id: `${cls.id}:${key}:rule`,
-                classId: cls.id,
-                className: cls.name,
-                date,
-                weekday: dayName,
-                slotIdx: i,
-                periodLabel: periodLabelFor(i),
-                type: "rule",
-                courseName: course.name || course.id,
-                description: `Course "${course.name || course.id}" is placed on a slot/weekday not allowed by its rules.`,
-              });
+              const keyStr = `${cls.id}:${key}`;
+              if (!state.ignoredConflicts?.includes(keyStr)) {
+                list.push({
+                  id: `${cls.id}:${key}:rule`,
+                  classId: cls.id,
+                  className: cls.name,
+                  date,
+                  weekday: dayName,
+                  slotIdx: i,
+                  periodLabel: periodLabelFor(i),
+                  type: "rule",
+                  courseName: course.name || course.id,
+                  description: `Course "${course.name || course.id}" is placed on a slot/weekday not allowed by its rules.`,
+                });
+              }
             }
           }
         });
 
         // Faculty conflicts
-        Object.entries(facultyToClass).forEach(([faculty, assignments]) => {
-          const uniqueClassIds = Array.from(new Set(assignments.map((a) => a.classId)));
-          if (uniqueClassIds.length > 1) {
-            assignments.forEach((assignment) => {
-              const others = assignments
-                .filter((a) => a.classId !== assignment.classId)
-                .map((a) => `"${a.courseName}" in ${a.className}`)
-                .join(" & ");
-
-              list.push({
-                id: `${assignment.classId}:${key}:faculty:${faculty}`,
-                classId: assignment.classId,
-                className: assignment.className,
-                date,
-                weekday: dayName,
-                slotIdx: i,
-                periodLabel: periodLabelFor(i),
-                type: "faculty",
-                faculty,
-                description: `Faculty "${faculty}" is also scheduled for ${others}.`,
-              });
+        Object.entries(facultyToAssignments).forEach(([faculty, assignments]) => {
+          for (let aIdx = 0; aIdx < assignments.length; aIdx++) {
+            const a = assignments[aIdx];
+            const matchingClashes = assignments.filter((b) => {
+              if (a.classId === b.classId) return false;
+              const isSameCommonCourse =
+                a.course.common &&
+                b.course.common &&
+                a.course.name.toLowerCase().trim() === b.course.name.toLowerCase().trim();
+              return !isSameCommonCourse;
             });
+
+            if (matchingClashes.length > 0) {
+              const keyStr = `${a.classId}:${key}`;
+              if (!state.ignoredConflicts?.includes(keyStr)) {
+                const others = matchingClashes
+                  .map((b) => `"${b.course.name || b.course.id}" in ${b.className}`)
+                  .join(" & ");
+
+                list.push({
+                  id: `${a.classId}:${key}:faculty:${faculty}`,
+                  classId: a.classId,
+                  className: a.className,
+                  date,
+                  weekday: dayName,
+                  slotIdx: i,
+                  periodLabel: periodLabelFor(i),
+                  type: "faculty",
+                  faculty,
+                  courseName: a.course.name || a.course.id,
+                  description: `Faculty "${faculty}" is scheduled to teach "${a.course.name || a.course.id}" here, but is also teaching ${others}.`,
+                });
+              }
+            }
           }
         });
       });
@@ -859,7 +1177,7 @@ function Index() {
     return list;
   }, [state, periodLabelFor]);
 
-  const applyTool = (date: string, slotIdx: number, tool: Tool) => {
+  const applyTool = (date: string, slotIdx: number, tool: Tool, isIntermediate = false) => {
     if (state.frozen) {
       setAutoFillReport("Timetable is frozen — unfreeze to make changes.");
       return;
@@ -900,34 +1218,37 @@ function Index() {
         }
       }
     }
-    setState((s) => ({
-      ...s,
-      classes: s.classes.map((cls) => {
-        if (cls.id !== activeClassId) return cls;
-        const grid = { ...cls.grid };
-        // How many slots does this tool span?
-        let span = 1;
-        if (tool.kind === "course") {
-          const course = cls.courses.find((c) => c.id === tool.courseId);
-          span = cleanDurationSlots(course?.durationSlots, s.slots);
-        }
-        for (let k = 0; k < span; k++) {
-          const idx = slotIdx + k;
-          if (idx >= s.slots.length) break;
-          if (s.slots[idx].isBreak) continue; // never write into break slots
+    setState(
+      (s) => ({
+        ...s,
+        classes: s.classes.map((cls) => {
+          if (cls.id !== activeClassId) return cls;
+          const grid = { ...cls.grid };
+          // How many slots does this tool span?
+          let span = 1;
           if (tool.kind === "course") {
             const course = cls.courses.find((c) => c.id === tool.courseId);
-            if (course && !overrideMode && !courseAllowedSlotOn(course, idx, date)) continue;
+            span = cleanDurationSlots(course?.durationSlots, s.slots);
           }
-          const key = `${date}-${idx}`;
-          if (tool.kind === "erase") delete grid[key];
-          else if (tool.kind === "break") grid[key] = { kind: "break", label: "Break" };
-          else if (tool.kind === "blocked") grid[key] = { kind: "blocked", label: "Blocked" };
-          else grid[key] = { kind: "course", courseId: tool.courseId };
-        }
-        return { ...cls, grid };
+          for (let k = 0; k < span; k++) {
+            const idx = slotIdx + k;
+            if (idx >= s.slots.length) break;
+            if (s.slots[idx].isBreak) continue; // never write into break slots
+            if (tool.kind === "course") {
+              const course = cls.courses.find((c) => c.id === tool.courseId);
+              if (course && !overrideMode && !courseAllowedSlotOn(course, idx, date)) continue;
+            }
+            const key = `${date}-${idx}`;
+            if (tool.kind === "erase") delete grid[key];
+            else if (tool.kind === "break") grid[key] = { kind: "break", label: "Break" };
+            else if (tool.kind === "blocked") grid[key] = { kind: "blocked", label: "Blocked" };
+            else grid[key] = { kind: "course", courseId: tool.courseId, locked: true };
+          }
+          return { ...cls, grid };
+        }),
       }),
-    }));
+      isIntermediate,
+    );
   };
 
   // Bulk block/break by weekday + slot indices
@@ -1012,6 +1333,32 @@ function Index() {
     setAutoFillReport(`Cleared "${activeClass.name}" — course assignments removed.`);
   };
 
+  const clearCoursePlacements = (courseId: string) => {
+    if (state.frozen) {
+      setAutoFillReport("Timetable is frozen — unfreeze to clear.");
+      return;
+    }
+    const course = activeClass?.courses.find((c) => c.id === courseId);
+    if (!course || !activeClass) return;
+    if (!confirm(`Clear all scheduled placements for "${course.name}" from "${activeClass.name}"?`))
+      return;
+    setState((s) => ({
+      ...s,
+      classes: s.classes.map((cls) => {
+        if (cls.id !== activeClassId) return cls;
+        const grid = { ...cls.grid };
+        Object.keys(grid).forEach((key) => {
+          const cell = grid[key];
+          if (cell?.kind === "course" && cell.courseId === courseId) {
+            delete grid[key];
+          }
+        });
+        return { ...cls, grid };
+      }),
+    }));
+    setAutoFillReport(`Cleared all placements for course "${course.name}".`);
+  };
+
   const onCellMouseDown = (date: string, slotIdx: number, e: React.MouseEvent) => {
     if (state.slots[slotIdx]?.isBreak) {
       e.preventDefault();
@@ -1032,7 +1379,8 @@ function Index() {
     if (e.button !== 0) return;
     if (armedTool) {
       e.preventDefault();
-      applyTool(date, slotIdx, armedTool);
+      dragStartStateRef.current = state;
+      applyTool(date, slotIdx, armedTool, true);
       setIsPainting(true);
     } else {
       setPicker({ date, slotIdx });
@@ -1041,7 +1389,7 @@ function Index() {
   const onCellEnter = (date: string, slotIdx: number, e: React.MouseEvent) => {
     // Only paint while a mouse button is actually held down
     if (isPainting && armedTool && (e.buttons & 1) === 1) {
-      applyTool(date, slotIdx, armedTool);
+      applyTool(date, slotIdx, armedTool, true);
     }
   };
 
@@ -1083,6 +1431,26 @@ function Index() {
   const renameClass = (id: string, name: string) =>
     setState((s) => ({ ...s, classes: s.classes.map((c) => (c.id === id ? { ...c, name } : c)) }));
 
+  const duplicateClass = (id: string) => {
+    setState((s) => {
+      const original = s.classes.find((c) => c.id === id);
+      if (!original) return s;
+      const newId = `k${Date.now()}`;
+      const copy: ClassData = {
+        id: newId,
+        name: `${original.name} (Copy)`,
+        grid: JSON.parse(JSON.stringify(original.grid)),
+        courses: original.courses.map((c) => ({ ...c })),
+        fromDate: original.fromDate,
+        toDate: original.toDate,
+      };
+      return {
+        ...s,
+        classes: [...s.classes, copy],
+      };
+    });
+  };
+
   // Courses are per-class — all edits scope to the active class
   const addCourse = () =>
     setState((s) => ({
@@ -1098,7 +1466,7 @@ function Index() {
               name: "New Course",
               faculty: "Faculty",
               classroom: "",
-              color: COLORS[cls.courses.length % COLORS.length],
+              color: getUniqueCourseColor(cls.courses),
               durationSlots: 1,
               weeklyPeriods: 3,
             },
@@ -1106,6 +1474,30 @@ function Index() {
         };
       }),
     }));
+  const duplicateCourse = (courseId: string) =>
+    setState((s) => {
+      const activeClass = s.classes.find((c) => c.id === activeClassId);
+      if (!activeClass) return s;
+      const original = activeClass.courses.find((c) => c.id === courseId);
+      if (!original) return s;
+      const copy: Course = {
+        ...original,
+        id: `c${Date.now()}`,
+        name: `${original.name} (Copy)`,
+        color: getUniqueCourseColor(activeClass.courses),
+      };
+      return {
+        ...s,
+        classes: s.classes.map((cls) => {
+          if (cls.id !== activeClassId) return cls;
+          return {
+            ...cls,
+            courses: [...cls.courses, copy],
+          };
+        }),
+      };
+    });
+
   const updateCourse = (id: string, patch: Partial<Course>) =>
     setState((s) => ({
       ...s,
@@ -1162,9 +1554,7 @@ function Index() {
       let placedCount = 0;
       const unmet: string[] = [];
 
-      const mutableClasses = opts.strictRules
-        ? classes.filter((cls) => cls.id === activeClassId)
-        : classes;
+      const mutableClasses = classes.filter((cls) => cls.id === activeClassId);
 
       if (opts.overwrite) {
         mutableClasses.forEach((cls) => {
@@ -1206,26 +1596,23 @@ function Index() {
                 const prev = slotIdx > 0 ? cls.grid[`${date}-${slotIdx - 1}`] : undefined;
                 if (prev?.kind === "course" && prev.courseId === cell.courseId) continue;
                 const course = cls.courses.find((c) => c.id === cell.courseId);
-                const span = course ? cleanDurationSlots(course.durationSlots, s.slots) : 1;
-                const hasFullSpan =
-                  Boolean(course) &&
-                  Array.from({ length: span }, (_, i) => {
-                    const idx = slotIdx + i;
-                    const part = cls.grid[`${date}-${idx}`];
-                    return (
-                      idx < s.slots.length &&
-                      !s.slots[idx]?.isBreak &&
-                      part?.kind === "course" &&
-                      part.courseId === cell.courseId
-                    );
-                  }).every(Boolean);
-                if (
-                  !course ||
-                  !hasFullSpan ||
-                  !courseSpanFitsRules(course, s.slots, date, slotIdx)
-                ) {
+                if (!course) {
+                  deleteCourseRun(cls, date, slotIdx, cell.courseId);
+                  continue;
+                }
+                let L = 0;
+                while (slotIdx + L < s.slots.length) {
+                  const part = cls.grid[`${date}-${slotIdx + L}`];
+                  if (part?.kind === "course" && part.courseId === cell.courseId) {
+                    L++;
+                  } else {
+                    break;
+                  }
+                }
+                if (!courseBlockFitsRules(cls.grid, course, s.slots, date, slotIdx, L)) {
                   deleteCourseRun(cls, date, slotIdx, cell.courseId);
                 }
+                slotIdx += L - 1;
               }
             });
           });
@@ -1285,11 +1672,14 @@ function Index() {
         .map(({ idx }) => idx);
 
       const startSlotsFor = (course: Course, date: string): number[] => {
+        // If not strictRules, we ignore course period rules and can start anywhere
+        if (!opts.strictRules) {
+          return allNonBreakStarts;
+        }
         const eff = effectiveAllowedSlots(course, date);
         const candidates = eff ?? allNonBreakStarts;
         return candidates
           .filter((idx) => idx >= 0 && idx < s.slots.length && !s.slots[idx].isBreak)
-          .filter((idx) => opts.strictRules || courseAllowedSlotOn(course, idx, date))
           .sort((a, b) => a - b);
       };
 
@@ -1298,16 +1688,29 @@ function Index() {
           const idx = start + i;
           if (idx >= s.slots.length) return false;
           if (s.slots[idx].isBreak) return false;
-          if (!courseAllowedSlotOn(course, idx, date)) return false;
+          if (opts.strictRules && !courseAllowedSlotOn(course, idx, date)) return false;
         }
         return true;
       };
 
-      const canPlace = (cls: ClassData, course: Course, date: string, start: number): boolean => {
+      const canPlace = (
+        cls: ClassData,
+        course: Course,
+        date: string,
+        start: number,
+        span: number,
+      ): boolean => {
         if (!courseAllowedOn(course, date)) return false;
         if (!startSlotsFor(course, date).includes(start)) return false;
-        if (!spanFitsCourse(course, start, date)) return false;
-        for (let i = 0; i < cleanDurationSlots(course.durationSlots, s.slots); i++) {
+        if (opts.strictRules) {
+          if (!courseBlockFitsRules(cls.grid, course, s.slots, date, start, span)) return false;
+        } else {
+          for (let i = 0; i < span; i++) {
+            const idx = start + i;
+            if (idx >= s.slots.length || s.slots[idx].isBreak) return false;
+          }
+        }
+        for (let i = 0; i < span; i++) {
           const idx = start + i;
           const key = `${date}-${idx}`;
           const existing = cls.grid[key];
@@ -1323,12 +1726,23 @@ function Index() {
         course: Course,
         date: string,
         start: number,
+        span: number,
       ): string => {
         if (!courseAllowedOn(course, date)) return "outside course day/date rules";
         if (!startSlotsFor(course, date).includes(start)) return "period not selected in rules";
-        if (!spanFitsCourse(course, start, date))
-          return "span crosses a break or disallowed period";
-        for (let i = 0; i < cleanDurationSlots(course.durationSlots, s.slots); i++) {
+        if (opts.strictRules) {
+          if (!courseBlockFitsRules(cls.grid, course, s.slots, date, start, span)) {
+            return "span violates consecutive rules or selected periods";
+          }
+        } else {
+          for (let i = 0; i < span; i++) {
+            const idx = start + i;
+            if (idx >= s.slots.length || s.slots[idx].isBreak) {
+              return "span crosses a break";
+            }
+          }
+        }
+        for (let i = 0; i < span; i++) {
           const idx = start + i;
           const key = `${date}-${idx}`;
           const existing = cls.grid[key];
@@ -1390,7 +1804,7 @@ function Index() {
         cls: ClassData,
         course: Course,
         dateList: string[],
-        desiredSessions: number,
+        desiredPeriods: number,
         label: string,
       ) => {
         const startsByDate: Record<string, number[]> = {};
@@ -1399,24 +1813,36 @@ function Index() {
         dateList.forEach((d, dateIdx) => {
           dateOrder[d] = dateIdx;
           if (!courseAllowedOn(course, d)) return;
-          const starts = startSlotsFor(course, d).filter((start) =>
-            spanFitsCourse(course, start, d),
-          );
+          const starts = startSlotsFor(course, d);
           startsByDate[d] = starts;
           possibleStarts += starts.length;
         });
-        if (opts.strictRules && possibleStarts > 0) {
-          desiredSessions =
-            desiredSessions <= 0 ? possibleStarts : Math.min(desiredSessions, possibleStarts);
-        } else if (desiredSessions > 0 && possibleStarts > 0) {
-          desiredSessions = Math.min(desiredSessions, possibleStarts);
-        }
-        if (desiredSessions <= 0) return;
-        const { placed, perDay, perSlot } = countPlacedStarts(cls, course, dateList);
-        const remaining = Math.max(0, desiredSessions - placed);
+        if (possibleStarts === 0) return;
+
+        // Count placed periods in the date range
+        let placedPeriods = 0;
+        dateList.forEach((d) => {
+          for (let i = 0; i < s.slots.length; i++) {
+            const cell = cls.grid[`${d}-${i}`];
+            if (cell?.kind === "course" && cell.courseId === course.id) {
+              placedPeriods++;
+            }
+          }
+        });
+
+        const remaining = Math.max(0, desiredPeriods - placedPeriods);
         totalTarget += remaining;
         if (remaining > 0) {
-          tasks.push({ cls, course, remaining, perDay, perSlot, startsByDate, dateOrder, label });
+          tasks.push({
+            cls,
+            course,
+            remaining,
+            perDay: {},
+            perSlot: {},
+            startsByDate,
+            dateOrder,
+            label,
+          });
         }
       };
 
@@ -1446,9 +1872,21 @@ function Index() {
 
       const availableCount = (task: AutoTask) => {
         let count = 0;
+        const min = courseMinStretch(task.course);
+        const max = courseMaxStretch(task.course);
+        const effMin = opts.strictRules ? Math.min(min, task.remaining) : 1;
+        const effMax = opts.strictRules
+          ? Math.min(max, task.remaining)
+          : Math.min(cleanDurationSlots(task.course.durationSlots, s.slots), task.remaining);
+
         Object.entries(task.startsByDate).forEach(([date, starts]) => {
           starts.forEach((start) => {
-            if (canPlace(task.cls, task.course, date, start)) count++;
+            for (let span = effMax; span >= effMin; span--) {
+              if (canPlace(task.cls, task.course, date, start, span)) {
+                count++;
+                break;
+              }
+            }
           });
         });
         return count;
@@ -1485,55 +1923,87 @@ function Index() {
           return aRules - bRules;
         });
 
-        let nextPlacement: { task: AutoTask; date: string; slot: number; score: number } | null =
-          null;
+        let nextPlacement: {
+          task: AutoTask;
+          date: string;
+          slot: number;
+          span: number;
+          score: number;
+        } | null = null;
         for (const task of tasks) {
           if (task.remaining <= 0) continue;
+          const min = courseMinStretch(task.course);
+          const max = courseMaxStretch(task.course);
+          const effMin = opts.strictRules ? Math.min(min, task.remaining) : 1;
+          const effMax = opts.strictRules
+            ? Math.min(max, task.remaining)
+            : Math.min(cleanDurationSlots(task.course.durationSlots, s.slots), task.remaining);
+
           for (const [date, starts] of Object.entries(task.startsByDate)) {
             for (const sIdx of starts) {
-              if (!canPlace(task.cls, task.course, date, sIdx)) continue;
-              const taskIndex = tasks.indexOf(task);
-              const span = cleanDurationSlots(task.course.durationSlots, s.slots);
-              const currentAvailability = availability.get(task) ?? 0;
-              const wouldBlockAnotherRequiredSlot = tasks.reduce((risk, other) => {
-                if (other === task || other.remaining <= 0) return risk;
-                const otherAvailability = availability.get(other) ?? 0;
-                if (otherAvailability === 0) return risk;
-                let blockedOptions = 0;
-                Object.entries(other.startsByDate).forEach(([otherDate, otherStarts]) => {
-                  otherStarts.forEach((otherStart) => {
-                    if (!canPlace(other.cls, other.course, otherDate, otherStart)) return;
-                    const otherSpan = cleanDurationSlots(other.course.durationSlots, s.slots);
-                    let overlaps = false;
-                    for (let a = 0; a < span; a++) {
-                      for (let b = 0; b < otherSpan; b++) {
-                        if (date === otherDate && sIdx + a === otherStart + b) overlaps = true;
+              for (let span = effMax; span >= effMin; span--) {
+                if (!canPlace(task.cls, task.course, date, sIdx, span)) continue;
+                const taskIndex = tasks.indexOf(task);
+                const currentAvailability = availability.get(task) ?? 0;
+                const wouldBlockAnotherRequiredSlot = tasks.reduce((risk, other) => {
+                  if (other === task || other.remaining <= 0) return risk;
+                  const otherAvailability = availability.get(other) ?? 0;
+                  if (otherAvailability === 0) return risk;
+                  let blockedOptions = 0;
+                  const otherMin = courseMinStretch(other.course);
+                  const otherMax = courseMaxStretch(other.course);
+                  const otherEffMin = opts.strictRules ? Math.min(otherMin, other.remaining) : 1;
+                  const otherEffMax = opts.strictRules
+                    ? Math.min(otherMax, other.remaining)
+                    : Math.min(
+                        cleanDurationSlots(other.course.durationSlots, s.slots),
+                        other.remaining,
+                      );
+
+                  Object.entries(other.startsByDate).forEach(([otherDate, otherStarts]) => {
+                    otherStarts.forEach((otherStart) => {
+                      let hadValidSpan = false;
+                      for (let otherSpan = otherEffMax; otherSpan >= otherEffMin; otherSpan--) {
+                        if (canPlace(other.cls, other.course, otherDate, otherStart, otherSpan)) {
+                          hadValidSpan = true;
+                          break;
+                        }
                       }
-                    }
-                    if (!overlaps) return;
-                    if (other.cls.id === task.cls.id || sharesFaculty(other.course, task.course)) {
-                      blockedOptions++;
-                    }
+                      if (!hadValidSpan) return;
+
+                      let overlaps = false;
+                      for (let a = 0; a < span; a++) {
+                        for (let otherSpan = otherEffMax; otherSpan >= otherEffMin; otherSpan--) {
+                          for (let b = 0; b < otherSpan; b++) {
+                            if (date === otherDate && sIdx + a === otherStart + b) overlaps = true;
+                          }
+                        }
+                      }
+                      if (!overlaps) return;
+                      if (
+                        other.cls.id === task.cls.id ||
+                        sharesFaculty(other.course, task.course)
+                      ) {
+                        blockedOptions++;
+                      }
+                    });
                   });
-                });
-                return otherAvailability - blockedOptions < other.remaining ? risk + 1 : risk;
-              }, 0);
-              const avoidableRisk =
-                currentAvailability > task.remaining ? wouldBlockAnotherRequiredSlot : 0;
-              // Global earliest-first selection: choose the nearest valid date/period
-              // across every class/course before considering spread or course priority.
-              // This prevents an open rule slot from being skipped while a later slot is used.
-              const score =
-                avoidableRisk * 1000000000000 +
-                (globalDateOrder.get(date) ?? workingDates.length) * 1000000000 +
-                sIdx * 1000000 +
-                (task.dateOrder[date] ?? workingDates.length) * 10000 +
-                taskIndex * 100 +
-                (task.perDay[date] ?? 0) * 10 +
-                (task.perSlot[sIdx] ?? 0) +
-                classDayLoad(task.cls, date);
-              if (!nextPlacement || score < nextPlacement.score) {
-                nextPlacement = { task, date, slot: sIdx, score };
+                  return otherAvailability - blockedOptions < other.remaining ? risk + 1 : risk;
+                }, 0);
+                const avoidableRisk =
+                  currentAvailability > task.remaining ? wouldBlockAnotherRequiredSlot : 0;
+                const score =
+                  avoidableRisk * 1000000000000 +
+                  (globalDateOrder.get(date) ?? workingDates.length) * 1000000000 +
+                  sIdx * 1000000 +
+                  (task.dateOrder[date] ?? workingDates.length) * 10000 +
+                  taskIndex * 100 +
+                  (task.perDay[date] ?? 0) * 10 +
+                  (task.perSlot[sIdx] ?? 0) +
+                  classDayLoad(task.cls, date);
+                if (!nextPlacement || score < nextPlacement.score) {
+                  nextPlacement = { task, date, slot: sIdx, span, score };
+                }
               }
             }
           }
@@ -1541,7 +2011,7 @@ function Index() {
         if (!nextPlacement) continue;
 
         const task = nextPlacement.task;
-        const span = cleanDurationSlots(task.course.durationSlots, s.slots);
+        const span = nextPlacement.span;
         for (let i = 0; i < span; i++) {
           const key = `${nextPlacement.date}-${nextPlacement.slot + i}`;
           task.cls.grid[key] = { kind: "course", courseId: task.course.id };
@@ -1552,8 +2022,8 @@ function Index() {
         }
         task.perDay[nextPlacement.date] = (task.perDay[nextPlacement.date] ?? 0) + 1;
         task.perSlot[nextPlacement.slot] = (task.perSlot[nextPlacement.slot] ?? 0) + 1;
-        task.remaining--;
-        placedCount++;
+        task.remaining -= span;
+        placedCount += span;
         progressed = true;
       }
 
@@ -1561,10 +2031,24 @@ function Index() {
         if (task.remaining <= 0) return;
         const openNow = availableCount(task);
         const reasonCounts = new Map<string, number>();
+        const min = courseMinStretch(task.course);
+        const max = courseMaxStretch(task.course);
+        const effMin = opts.strictRules ? Math.min(min, task.remaining) : 1;
+        const effMax = opts.strictRules
+          ? Math.min(max, task.remaining)
+          : Math.min(cleanDurationSlots(task.course.durationSlots, s.slots), task.remaining);
+
         Object.entries(task.startsByDate).forEach(([date, starts]) => {
           starts.forEach((start) => {
-            if (canPlace(task.cls, task.course, date, start)) return;
-            const reason = unavailableReason(task.cls, task.course, date, start);
+            let hasValidSpan = false;
+            for (let span = effMax; span >= effMin; span--) {
+              if (canPlace(task.cls, task.course, date, start, span)) {
+                hasValidSpan = true;
+                break;
+              }
+            }
+            if (hasValidSpan) return;
+            const reason = unavailableReason(task.cls, task.course, date, start, effMax);
             reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
           });
         });
@@ -1594,10 +2078,21 @@ function Index() {
             }
             const prev = slotIdx > 0 ? cls.grid[`${date}-${slotIdx - 1}`] : undefined;
             const isStart = !(prev?.kind === "course" && prev.courseId === cell.courseId);
-            if (isStart && !courseSpanFitsRules(course, s.slots, date, slotIdx)) {
-              auditIssues.push(
-                `${cls.name} ${course.name} violates rules at ${date} ${periodLabelFor(slotIdx)}`,
-              );
+            if (isStart) {
+              let L = 0;
+              while (slotIdx + L < s.slots.length) {
+                const nextCell = cls.grid[`${date}-${slotIdx + L}`];
+                if (nextCell?.kind === "course" && nextCell.courseId === cell.courseId) {
+                  L++;
+                } else {
+                  break;
+                }
+              }
+              if (!courseBlockFitsRules(cls.grid, course, s.slots, date, slotIdx, L)) {
+                auditIssues.push(
+                  `${cls.name} ${course.name} violates rules at ${date} ${periodLabelFor(slotIdx)}`,
+                );
+              }
             }
             getFaculties(course).forEach((f) => {
               const list = facultyAtSlot.get(f) ?? [];
@@ -1638,12 +2133,7 @@ function Index() {
           : opts.overwrite
             ? "Regenerate"
             : "Fill Empty";
-        if (firstVisibleClass && activeVisibleCount === 0) {
-          setActiveClassId(firstVisibleClass.id);
-          setPendingScrollClassId(firstVisibleClass.id);
-        } else if (firstVisibleClass) {
-          setPendingScrollClassId(activeClassId);
-        }
+        setPendingScrollClassId(activeClassId);
         if (totalTarget === 0) {
           const validDates = workingDates.length;
           const courseCount = classes.reduce((sum, cls) => sum + cls.courses.length, 0);
@@ -1657,8 +2147,14 @@ function Index() {
             .join(", ");
           setAutoFillReport(`${mode}: nothing to place${reason ? ` — check ${reason}.` : "."}`);
         } else if (unmet.length > 0) {
+          const debugCourse = classes
+            .flatMap((c) => c.courses)
+            .find((c) => c.name.includes("DES1203") || c.id.includes("DES1203"));
+          const debugInfo = debugCourse
+            ? ` | DES1203 debug: from=${debugCourse.fromDate ?? "none"}, to=${debugCourse.toDate ?? "none"}, wds=${JSON.stringify(debugCourse.allowedWeekdays)}, slots=${JSON.stringify(debugCourse.allowedSlots)}, slotsWd=${JSON.stringify(debugCourse.allowedSlotsByWeekday)}, dur=${debugCourse.durationSlots}, min=${debugCourse.minDurationSlots ?? "none"}, max=${debugCourse.maxDurationSlots ?? "none"}, enabled=${debugCourse.stretchRuleEnabled !== false}`
+            : "";
           setAutoFillReport(
-            `${mode}: placed ${placedCount} of ${totalTarget}. ${safetyRemoved > 0 ? `Removed ${safetyRemoved} unsafe old cell${safetyRemoved === 1 ? "" : "s"}. ` : ""}Remaining: ${unmet.slice(0, 4).join("; ")}`,
+            `${mode}: placed ${placedCount} of ${totalTarget}. ${safetyRemoved > 0 ? `Removed ${safetyRemoved} unsafe old cell${safetyRemoved === 1 ? "" : "s"}. ` : ""}Remaining: ${unmet.slice(0, 4).join("; ")}${debugInfo}`,
           );
         } else if (auditIssues.length > 0) {
           setAutoFillReport(
@@ -1989,6 +2485,332 @@ function Index() {
       XLSXStyle.utils.book_append_sheet(wb, ws, cls.name.slice(0, 31) || "Class");
     });
     XLSXStyle.writeFile(wb, `timetable_${state.fromDate}_to_${state.toDate}.xlsx`);
+  };
+  const exportSingleFacultyExcel = (faculty: string) => {
+    const refClass = activeClass || state.classes[0];
+    if (!refClass) {
+      alert("No classes available to export.");
+      return;
+    }
+    const wb = XLSXStyle.utils.book_new();
+    const hexClean = (h: string) =>
+      (h || "").replace("#", "").padStart(6, "0").slice(-6).toUpperCase();
+    const textColorFor = (hex: string) => {
+      const h = hexClean(hex);
+      const r = parseInt(h.slice(0, 2), 16);
+      const g = parseInt(h.slice(2, 4), 16);
+      const b = parseInt(h.slice(4, 6), 16);
+      const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      return lum > 0.6 ? "111111" : "FFFFFF";
+    };
+    const border = { style: "thin", color: { rgb: "CCCCCC" } } as const;
+    const baseBorders = { top: border, bottom: border, left: border, right: border };
+
+    const workingDates = daysBetween(state.fromDate, state.toDate);
+
+    const header = [
+      "Week",
+      "Day / Date",
+      ...state.slots.map((s) => (s.isBreak ? "Break" : slotLabel(s))),
+    ];
+    const rows: (string | number)[][] = [header];
+
+    workingDates.forEach((date) => {
+      const { weekday, date: dstr } = dayLabel(date);
+      const weekIndex = weekIndexForDate(refClass, state, date);
+      const row: (string | number)[] = [`W${weekIndex}`, `${weekday} ${dstr}`];
+
+      state.slots.forEach((sl, i) => {
+        if (sl.isBreak) {
+          row.push("Break");
+          return;
+        }
+        const matches: string[] = [];
+        const commonMap = new Map<string, { classNames: string[]; courseName: string }>();
+        const individualMatches: string[] = [];
+
+        state.classes.forEach((cls) => {
+          const cell = cls.grid[`${date}-${i}`];
+          if (cell?.kind === "course") {
+            const course = cls.courses.find((x) => x.id === cell.courseId);
+            if (course && course.faculty) {
+              const names = course.faculty.split(",").map((f) => f.trim().toLowerCase());
+              if (names.includes(faculty.toLowerCase())) {
+                if (course.common) {
+                  const key = course.name.trim().toLowerCase();
+                  const existing = commonMap.get(key);
+                  if (existing) {
+                    if (!existing.classNames.includes(cls.name)) {
+                      existing.classNames.push(cls.name);
+                    }
+                  } else {
+                    commonMap.set(key, { classNames: [cls.name], courseName: course.name });
+                  }
+                } else {
+                  individualMatches.push(`${cls.name} - ${course.name}`);
+                }
+              }
+            }
+          }
+        });
+
+        // Format common groups
+        commonMap.forEach((val) => {
+          matches.push(`${val.classNames.join(", ")} - ${val.courseName}`);
+        });
+        // Add individual ones
+        matches.push(...individualMatches);
+
+        row.push(matches.join(" / "));
+      });
+      rows.push(row);
+    });
+
+    const ws = XLSXStyle.utils.aoa_to_sheet(rows);
+    const numCols = header.length;
+    ws["!cols"] = Array.from({ length: numCols }, (_, i) => ({
+      wch: i === 0 ? 8 : i === 1 ? 18 : 22,
+    }));
+    ws["!rows"] = rows.map((_, i) => ({ hpt: i === 0 ? 24 : 32 }));
+
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < numCols; c++) {
+        const addr = XLSXStyle.utils.encode_cell({ r, c });
+        if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+        const cellStyle: Record<string, unknown> = {
+          alignment: { horizontal: "center", vertical: "center", wrapText: true },
+          border: baseBorders,
+          font: { name: "Calibri", sz: 11 },
+        };
+
+        if (r === 0 || c === 0 || c === 1) {
+          cellStyle.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } };
+          cellStyle.fill = { patternType: "solid", fgColor: { rgb: "0D0D0D" } };
+        } else {
+          const date = workingDates[r - 1];
+          const slotIdx = c - 2;
+          const sl = state.slots[slotIdx];
+          if (sl?.isBreak) {
+            cellStyle.fill = { patternType: "solid", fgColor: { rgb: "FDE68A" } };
+            cellStyle.font = { name: "Calibri", sz: 11, italic: true, color: { rgb: "78350F" } };
+          } else {
+            let matchColor = "";
+            state.classes.forEach((cls) => {
+              const cell = cls.grid[`${date}-${slotIdx}`];
+              if (cell?.kind === "course") {
+                const course = cls.courses.find((x) => x.id === cell.courseId);
+                if (course && course.faculty) {
+                  const names = course.faculty.split(",").map((f) => f.trim().toLowerCase());
+                  if (names.includes(faculty.toLowerCase())) {
+                    matchColor = course.color;
+                  }
+                }
+              }
+            });
+            if (matchColor) {
+              const bg = hexClean(matchColor);
+              cellStyle.fill = { patternType: "solid", fgColor: { rgb: bg } };
+              cellStyle.font = {
+                name: "Calibri",
+                sz: 11,
+                bold: true,
+                color: { rgb: textColorFor(bg) },
+              };
+            }
+          }
+        }
+        (ws[addr] as { s?: unknown }).s = cellStyle;
+      }
+    }
+    ws["!freeze"] = { xSplit: 2, ySplit: 1 };
+
+    let cleanName = faculty.replace(new RegExp("[\\\\/?*\\[\\]:]", "g"), " ").slice(0, 31).trim();
+    if (!cleanName) cleanName = "Faculty";
+
+    XLSXStyle.utils.book_append_sheet(wb, ws, cleanName);
+
+    XLSXStyle.writeFile(wb, `faculty_timetable_${cleanName.replace(/\s+/g, "_")}.xlsx`);
+  };
+  const exportFacultyExcel = () => {
+    const refClass = activeClass || state.classes[0];
+    if (!refClass) {
+      alert("No classes available to export.");
+      return;
+    }
+    const wb = XLSXStyle.utils.book_new();
+    const hexClean = (h: string) =>
+      (h || "").replace("#", "").padStart(6, "0").slice(-6).toUpperCase();
+    const textColorFor = (hex: string) => {
+      const h = hexClean(hex);
+      const r = parseInt(h.slice(0, 2), 16);
+      const g = parseInt(h.slice(2, 4), 16);
+      const b = parseInt(h.slice(4, 6), 16);
+      const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      return lum > 0.6 ? "111111" : "FFFFFF";
+    };
+    const border = { style: "thin", color: { rgb: "CCCCCC" } } as const;
+    const baseBorders = { top: border, bottom: border, left: border, right: border };
+
+    const facultiesMap = new Map<string, string>();
+    state.classes.forEach((cls) => {
+      cls.courses.forEach((c) => {
+        if (c.faculty) {
+          c.faculty
+            .split(",")
+            .map((f) => f.trim())
+            .filter(Boolean)
+            .forEach((f) => {
+              const lower = f.toLowerCase();
+              if (!facultiesMap.has(lower)) {
+                facultiesMap.set(lower, f);
+              }
+            });
+        }
+      });
+    });
+    const sortedFaculties = Array.from(facultiesMap.values()).sort((a, b) => a.localeCompare(b));
+
+    if (sortedFaculties.length === 0) {
+      alert("No faculty assignments found to export.");
+      return;
+    }
+
+    const workingDates = daysBetween(state.fromDate, state.toDate);
+    const usedSheetNames = new Set<string>();
+
+    sortedFaculties.forEach((faculty) => {
+      const header = [
+        "Week",
+        "Day / Date",
+        ...state.slots.map((s) => (s.isBreak ? "Break" : slotLabel(s))),
+      ];
+      const rows: (string | number)[][] = [header];
+
+      workingDates.forEach((date) => {
+        const { weekday, date: dstr } = dayLabel(date);
+        const weekIndex = weekIndexForDate(refClass, state, date);
+        const row: (string | number)[] = [`W${weekIndex}`, `${weekday} ${dstr}`];
+
+        state.slots.forEach((sl, i) => {
+          if (sl.isBreak) {
+            row.push("Break");
+            return;
+          }
+          const matches: string[] = [];
+          const commonMap = new Map<string, { classNames: string[]; courseName: string }>();
+          const individualMatches: string[] = [];
+
+          state.classes.forEach((cls) => {
+            const cell = cls.grid[`${date}-${i}`];
+            if (cell?.kind === "course") {
+              const course = cls.courses.find((x) => x.id === cell.courseId);
+              if (course && course.faculty) {
+                const names = course.faculty.split(",").map((f) => f.trim().toLowerCase());
+                if (names.includes(faculty.toLowerCase())) {
+                  if (course.common) {
+                    const key = course.name.trim().toLowerCase();
+                    const existing = commonMap.get(key);
+                    if (existing) {
+                      if (!existing.classNames.includes(cls.name)) {
+                        existing.classNames.push(cls.name);
+                      }
+                    } else {
+                      commonMap.set(key, { classNames: [cls.name], courseName: course.name });
+                    }
+                  } else {
+                    individualMatches.push(`${cls.name} - ${course.name}`);
+                  }
+                }
+              }
+            }
+          });
+
+          // Format common groups
+          commonMap.forEach((val) => {
+            matches.push(`${val.classNames.join(", ")} - ${val.courseName}`);
+          });
+          // Add individual ones
+          matches.push(...individualMatches);
+
+          row.push(matches.join(" / "));
+        });
+        rows.push(row);
+      });
+
+      const ws = XLSXStyle.utils.aoa_to_sheet(rows);
+      const numCols = header.length;
+      ws["!cols"] = Array.from({ length: numCols }, (_, i) => ({
+        wch: i === 0 ? 8 : i === 1 ? 18 : 22,
+      }));
+      ws["!rows"] = rows.map((_, i) => ({ hpt: i === 0 ? 24 : 32 }));
+
+      for (let r = 0; r < rows.length; r++) {
+        for (let c = 0; c < numCols; c++) {
+          const addr = XLSXStyle.utils.encode_cell({ r, c });
+          if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+          const cellStyle: Record<string, unknown> = {
+            alignment: { horizontal: "center", vertical: "center", wrapText: true },
+            border: baseBorders,
+            font: { name: "Calibri", sz: 11 },
+          };
+
+          if (r === 0 || c === 0 || c === 1) {
+            cellStyle.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } };
+            cellStyle.fill = { patternType: "solid", fgColor: { rgb: "0D0D0D" } };
+          } else {
+            const date = workingDates[r - 1];
+            const slotIdx = c - 2;
+            const sl = state.slots[slotIdx];
+            if (sl?.isBreak) {
+              cellStyle.fill = { patternType: "solid", fgColor: { rgb: "FDE68A" } };
+              cellStyle.font = { name: "Calibri", sz: 11, italic: true, color: { rgb: "78350F" } };
+            } else {
+              let matchColor = "";
+              state.classes.forEach((cls) => {
+                const cell = cls.grid[`${date}-${slotIdx}`];
+                if (cell?.kind === "course") {
+                  const course = cls.courses.find((x) => x.id === cell.courseId);
+                  if (course && course.faculty) {
+                    const names = course.faculty.split(",").map((f) => f.trim().toLowerCase());
+                    if (names.includes(faculty.toLowerCase())) {
+                      matchColor = course.color;
+                    }
+                  }
+                }
+              });
+              if (matchColor) {
+                const bg = hexClean(matchColor);
+                cellStyle.fill = { patternType: "solid", fgColor: { rgb: bg } };
+                cellStyle.font = {
+                  name: "Calibri",
+                  sz: 11,
+                  bold: true,
+                  color: { rgb: textColorFor(bg) },
+                };
+              }
+            }
+          }
+          (ws[addr] as { s?: unknown }).s = cellStyle;
+        }
+      }
+      ws["!freeze"] = { xSplit: 2, ySplit: 1 };
+
+      let cleanName = faculty.replace(new RegExp("[\\\\/?*\\[\\]:]", "g"), " ").slice(0, 31).trim();
+      if (!cleanName) cleanName = "Faculty";
+
+      let finalName = cleanName;
+      let counter = 1;
+      while (usedSheetNames.has(finalName.toLowerCase())) {
+        const suffix = ` (${counter})`;
+        finalName = cleanName.slice(0, 31 - suffix.length) + suffix;
+        counter++;
+      }
+      usedSheetNames.add(finalName.toLowerCase());
+
+      XLSXStyle.utils.book_append_sheet(wb, ws, finalName);
+    });
+
+    XLSXStyle.writeFile(wb, `faculty_timetables_${state.fromDate}_to_${state.toDate}.xlsx`);
   };
   const exportCSV = () => {
     state.classes.forEach((cls) => {
@@ -2328,7 +3150,7 @@ function Index() {
       const clsDates = classDatesFor(cls, state);
       let n = 0;
       cls.courses.forEach((course) => {
-        n += countCourseSessionsInDates(cls.grid, course, state.slots, clsDates);
+        n += countCoursePeriodsInDates(cls.grid, course, state.slots, clsDates);
       });
       return n;
     };
@@ -2359,17 +3181,108 @@ function Index() {
     };
   }, [activeClass, dates, state.slots, state.classes]);
 
-  // Per-course assigned session counts for the active class (session starts only).
+  // Per-course assigned session counts for the active class.
   const coursePlacementCounts = useMemo(() => {
     const map = new Map<string, number>();
     if (!activeClass) return map;
+    const clsDates = classDatesFor(activeClass, state);
     activeClass.courses.forEach((course) => {
-      const count = countCourseSessionsInDates(activeClass.grid, course, state.slots, dates);
+      const count = countCoursePeriodsInDates(activeClass.grid, course, state.slots, clsDates);
       if (count > 0) map.set(course.id, count);
     });
     return map;
-  }, [activeClass, dates, state.slots]);
+  }, [activeClass, state.slots, state.fromDate, state.toDate]);
+  const globalFaculties = useMemo(() => {
+    const set = new Set<string>();
+    state.classes.forEach((cls) => {
+      cls.courses.forEach((c) => {
+        if (c.faculty) {
+          c.faculty
+            .split(",")
+            .map((f) => f.trim())
+            .filter(Boolean)
+            .forEach((f) => set.add(f));
+        }
+      });
+    });
+    return Array.from(set).sort();
+  }, [state.classes]);
 
+  const selectedFacultyCourses = useMemo(() => {
+    if (!selectedFaculty) return [];
+    const commonGroups = new Map<
+      string,
+      { classNames: string[]; courseName: string; weeklyPeriods: number }
+    >();
+    const individualList: Array<{ className: string; courseName: string; weeklyPeriods: number }> =
+      [];
+
+    state.classes.forEach((cls) => {
+      cls.courses.forEach((c) => {
+        if (c.faculty) {
+          const names = c.faculty.split(",").map((f) => f.trim().toLowerCase());
+          if (names.includes(selectedFaculty.toLowerCase())) {
+            if (c.common) {
+              const key = c.name.trim().toLowerCase();
+              const existing = commonGroups.get(key);
+              if (existing) {
+                if (!existing.classNames.includes(cls.name)) {
+                  existing.classNames.push(cls.name);
+                }
+              } else {
+                commonGroups.set(key, {
+                  classNames: [cls.name],
+                  courseName: c.name,
+                  weeklyPeriods: courseWeeklyTarget(c),
+                });
+              }
+            } else {
+              individualList.push({
+                className: cls.name,
+                courseName: c.name,
+                weeklyPeriods: courseWeeklyTarget(c),
+              });
+            }
+          }
+        }
+      });
+    });
+
+    const groupedCommon = Array.from(commonGroups.values()).map((g) => ({
+      className: g.classNames.join(", "),
+      courseName: g.courseName + " (Common)",
+      weeklyPeriods: g.weeklyPeriods,
+    }));
+
+    return [...groupedCommon, ...individualList];
+  }, [selectedFaculty, state.classes]);
+
+  const commitFacultyRename = (oldName: string, newName: string) => {
+    if (!newName || oldName === newName) {
+      setEditingFaculty(null);
+      return;
+    }
+    setState((s) => ({
+      ...s,
+      classes: s.classes.map((cls) => {
+        return {
+          ...cls,
+          courses: cls.courses.map((course) => {
+            if (!course.faculty) return course;
+            const names = course.faculty.split(",").map((f) => f.trim());
+            const updatedNames = names.map((name) => {
+              return name.toLowerCase() === oldName.toLowerCase() ? newName : name;
+            });
+            return {
+              ...course,
+              faculty: updatedNames.join(", "),
+            };
+          }),
+        };
+      }),
+    }));
+    setEditingFaculty(null);
+  };
   const handleWarningClick = (warning: (typeof conflictDetailsList)[0]) => {
     setActiveClassId(warning.classId);
     setPendingScroll({
@@ -2455,7 +3368,19 @@ function Index() {
                 {state.classes.map((cls) => {
                   const active = cls.id === activeClassId;
                   return (
-                    <div key={cls.id} className="flex items-stretch gap-1">
+                    <div
+                      key={cls.id}
+                      className="flex items-stretch gap-1"
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setClassContextMenu({
+                          classId: cls.id,
+                          x: e.clientX,
+                          y: e.clientY,
+                        });
+                      }}
+                    >
                       <button
                         onClick={() => setActiveClassId(cls.id)}
                         className={`flex-1 border px-3 py-2 text-left text-sm ${
@@ -2504,14 +3429,38 @@ function Index() {
               </div>
               <div className="space-y-2">
                 {(activeClass?.courses ?? []).map((c) => (
-                  <div key={c.id} className="border border-[#0d0d0d]/30 bg-white">
+                  <div
+                    key={c.id}
+                    className="border border-[#0d0d0d]/30 bg-white"
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setCourseContextMenu({
+                        courseId: c.id,
+                        x: e.clientX,
+                        y: e.clientY,
+                      });
+                    }}
+                  >
                     <div
                       className={
                         "flex items-center gap-2 border-b border-[#0d0d0d]/10 px-3 py-2 " +
                         (c.disabled ? "opacity-60" : "")
                       }
                     >
-                      <span className="h-3 w-3 shrink-0" style={{ backgroundColor: c.color }} />
+                      <label
+                        className="h-3.5 w-3.5 shrink-0 cursor-pointer border border-[#0d0d0d]/20 relative rounded overflow-hidden"
+                        title="Change course color"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span className="absolute inset-0" style={{ backgroundColor: c.color }} />
+                        <input
+                          type="color"
+                          value={c.color.startsWith("#") ? c.color : hslToHex(c.color)}
+                          onChange={(e) => updateCourse(c.id, { color: e.target.value })}
+                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full p-0 border-none"
+                        />
+                      </label>
                       <input
                         value={c.name}
                         onChange={(e) => updateCourse(c.id, { name: e.target.value })}
@@ -2521,6 +3470,11 @@ function Index() {
                           (c.disabled ? "line-through" : "")
                         }
                       />
+                      {c.common && (
+                        <span className="shrink-0 rounded bg-sky-100 border border-sky-300 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wider text-sky-800">
+                          Common
+                        </span>
+                      )}
                       <button
                         onClick={() =>
                           updateCourse(c.id, { disabled: c.disabled ? undefined : true })
@@ -2539,6 +3493,14 @@ function Index() {
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
                         {c.disabled ? "Off" : "On"}
+                      </button>
+                      <button
+                        onClick={() => clearCoursePlacements(c.id)}
+                        title="Clear all placed sessions of this course from this class"
+                        className="border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-700 hover:bg-red-100 hover:border-red-300"
+                        style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                      >
+                        Clear
                       </button>
                       <button
                         onClick={() => removeCourse(c.id)}
@@ -2599,19 +3561,25 @@ function Index() {
                         className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60"
                         style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
                       >
-                        <input
-                          type="number"
-                          min={1}
-                          max={Math.max(1, nonBreakCount(state.slots))}
+                        <select
                           value={c.durationSlots}
                           onChange={(e) =>
                             updateCourse(c.id, {
                               durationSlots: cleanDurationSlots(e.target.value, state.slots),
                             })
                           }
-                          className="w-10 border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-center text-xs"
-                        />
-                        <span title="Consecutive periods per session">span</span>
+                          className="border border-[#0d0d0d]/20 bg-white px-1 py-0.5 text-xs text-[#2d2d2d] outline-none"
+                        >
+                          {Array.from(
+                            { length: Math.min(7, Math.max(1, nonBreakCount(state.slots))) },
+                            (_, idx) => idx + 1,
+                          ).map((num) => (
+                            <option key={num} value={num}>
+                              {num}
+                            </option>
+                          ))}
+                        </select>
+                        <span title="Consecutive classes at a stretch in a day">at a stretch</span>
                       </label>
                       <label
                         title="Sessions per week (auto-fill target). Derived from LTPC (L+T+P) when any of L/T/P is set. Total uses this course date range inside the timetable."
@@ -3152,6 +4120,22 @@ function Index() {
                 Clear Current
               </button>
               <button
+                onClick={undo}
+                disabled={past.length === 0}
+                className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Undo (Cmd+Z / Ctrl+Z)"
+              >
+                ↩ Undo
+              </button>
+              <button
+                onClick={redo}
+                disabled={future.length === 0}
+                className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Redo (Cmd+R / Ctrl+R / Ctrl+Y)"
+              >
+                ↪ Redo
+              </button>
+              <button
                 onClick={() => fileInputRef.current?.click()}
                 className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
                 title="Load a .aadhi file"
@@ -3171,6 +4155,13 @@ function Index() {
                 title="Admin mode: load other classes' .aadhi files to cross-check all timetables"
               >
                 Admin
+              </button>
+              <button
+                onClick={() => setFacultyPanelOpen(true)}
+                className="border-2 border-[#0d0d0d] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-transform hover:bg-[#e8e4dd] active:translate-y-0.5"
+                title="Manage all faculty names across classes"
+              >
+                👥 Faculties
               </button>
               {conflictDetailsList.length > 0 && (
                 <button
@@ -3199,6 +4190,13 @@ function Index() {
                 className="border-2 border-[#0d0d0d] bg-[#0d0d0d] px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#f5f3ee] transition-transform hover:opacity-90 active:translate-y-0.5"
               >
                 Export Excel
+              </button>
+              <button
+                onClick={exportFacultyExcel}
+                className="border-2 border-[#0369a1] bg-[#e0f2fe] hover:bg-[#bae6fd] px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#0369a1] transition-transform active:translate-y-0.5"
+                title="Export each individual faculty's timetable into sheets in an Excel file"
+              >
+                Faculty Timetable
               </button>
             </div>
           </header>
@@ -3395,6 +4393,9 @@ function Index() {
                           const key = `${date}-${i}`;
                           const cell = activeClass.grid[key];
                           const isConflict = conflicts.has(`${activeClass.id}:${key}`);
+                          const isConflictIgnored = state.ignoredConflicts?.includes(
+                            `${activeClass.id}:${key}`,
+                          );
 
                           if (sl.isBreak) {
                             return (
@@ -3463,6 +4464,14 @@ function Index() {
                                     style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
                                   >
                                     {course?.name ?? "?"}
+                                    {isConflictIgnored && (
+                                      <span
+                                        className="ml-1 text-[9px] font-normal text-gray-500 opacity-60"
+                                        title="Conflict Ignored"
+                                      >
+                                        ⚠️🚫
+                                      </span>
+                                    )}
                                   </div>
                                   <div
                                     className={`text-[9px] uppercase tracking-wider ${
@@ -3678,16 +4687,8 @@ function Index() {
                   const allowed =
                     courseAllowedOn(c, picker.date) &&
                     courseAllowedSlotOn(c, picker.slotIdx, picker.date);
-                  // Count placed sessions of this course in the current date range
-                  let placedForCourse = 0;
-                  if (activeClass) {
-                    placedForCourse = countCourseSessionsInDates(
-                      activeClass.grid,
-                      c,
-                      state.slots,
-                      dates,
-                    );
-                  }
+                  // Count placed sessions of this course in the class date range
+                  const placedForCourse = coursePlacementCounts.get(c.id) ?? 0;
                   const dateRange =
                     c.fromDate || c.toDate
                       ? `${c.fromDate ?? "start"} → ${c.toDate ?? "end"}`
@@ -3780,6 +4781,35 @@ function Index() {
                 >
                   Clear
                 </button>
+              </div>
+
+              {/* Ignore conflict option */}
+              <div className="mt-4 border-t border-[#0d0d0d]/10 pt-3">
+                <label className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#2d2d2d]/60 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={
+                      state.ignoredConflicts?.includes(
+                        `${activeClass.id}:${picker.date}-${picker.slotIdx}`,
+                      ) ?? false
+                    }
+                    onChange={(e) => {
+                      const keyStr = `${activeClass.id}:${picker.date}-${picker.slotIdx}`;
+                      setState((s) => {
+                        const list = s.ignoredConflicts ? [...s.ignoredConflicts] : [];
+                        if (e.target.checked) {
+                          if (!list.includes(keyStr)) list.push(keyStr);
+                        } else {
+                          const idx = list.indexOf(keyStr);
+                          if (idx !== -1) list.splice(idx, 1);
+                        }
+                        return { ...s, ignoredConflicts: list };
+                      });
+                    }}
+                    className="accent-[#0d0d0d]"
+                  />
+                  <span>Ignore conflict on this slot</span>
+                </label>
               </div>
             </div>
           </div>
@@ -3983,7 +5013,7 @@ function Index() {
                   <div>
                     <div className="mb-2 flex items-center justify-between">
                       <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
-                        Per-weekday periods
+                        Available periods (per-day)
                       </span>
                       <button
                         onClick={() =>
@@ -4080,6 +5110,138 @@ function Index() {
                           </div>
                         );
                       })}
+                    </div>
+
+                    <div>
+                      <div className="mb-2 flex items-center justify-between mt-4">
+                        <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                          Classes at a stretch
+                        </span>
+                        <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60 font-semibold cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={course.stretchRuleEnabled !== false}
+                            onChange={(e) =>
+                              updateCourse(course.id, {
+                                stretchRuleEnabled: e.target.checked,
+                              })
+                            }
+                            className="accent-[#0d0d0d]"
+                          />
+                          <span>Enabled</span>
+                        </label>
+                      </div>
+
+                      {course.stretchRuleEnabled !== false ? (
+                        <>
+                          <div className="grid grid-cols-2 gap-2">
+                            <label className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60">
+                              <span>Min consecutive</span>
+                              <select
+                                value={course.minDurationSlots ?? course.durationSlots}
+                                onChange={(e) => {
+                                  const min = parseInt(e.target.value, 10);
+                                  const max = course.maxDurationSlots ?? course.durationSlots;
+                                  const nextMax = max < min ? min : max;
+                                  const currentDur = course.durationSlots;
+                                  const nextDur =
+                                    currentDur < min
+                                      ? min
+                                      : currentDur > nextMax
+                                        ? nextMax
+                                        : currentDur;
+                                  updateCourse(course.id, {
+                                    minDurationSlots: min,
+                                    maxDurationSlots: nextMax,
+                                    durationSlots: nextDur,
+                                  });
+                                }}
+                                className="border border-[#0d0d0d]/20 bg-white px-2 py-1 text-xs outline-none focus:border-[#0d0d0d]"
+                                style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                              >
+                                {Array.from(
+                                  { length: Math.min(7, Math.max(1, nonBreakCount(state.slots))) },
+                                  (_, idx) => idx + 1,
+                                ).map((num) => (
+                                  <option key={num} value={num}>
+                                    {num} period{num > 1 ? "s" : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60">
+                              <span>Max consecutive</span>
+                              <select
+                                value={course.maxDurationSlots ?? course.durationSlots}
+                                onChange={(e) => {
+                                  const max = parseInt(e.target.value, 10);
+                                  const min = course.minDurationSlots ?? course.durationSlots;
+                                  const nextMin = min > max ? max : min;
+                                  const currentDur = course.durationSlots;
+                                  const nextDur =
+                                    currentDur < nextMin
+                                      ? nextMin
+                                      : currentDur > max
+                                        ? max
+                                        : currentDur;
+                                  updateCourse(course.id, {
+                                    maxDurationSlots: max,
+                                    minDurationSlots: nextMin,
+                                    durationSlots: nextDur,
+                                  });
+                                }}
+                                className="border border-[#0d0d0d]/20 bg-white px-2 py-1 text-xs outline-none focus:border-[#0d0d0d]"
+                                style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                              >
+                                {Array.from(
+                                  { length: Math.min(7, Math.max(1, nonBreakCount(state.slots))) },
+                                  (_, idx) => idx + 1,
+                                ).map((num) => (
+                                  <option key={num} value={num}>
+                                    {num} period{num > 1 ? "s" : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                          <p className="mt-1 text-[10px] text-[#2d2d2d]/50">
+                            Specify the minimum and maximum consecutive classes of this course that
+                            can be scheduled in a single stretch (1 to 7).
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-[10px] text-[#2d2d2d]/50 italic">
+                          Stretch limits are disabled. This course can be scheduled for any
+                          consecutive number of periods.
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Common Course Toggle */}
+                    <div className="mt-4 border-t border-dashed border-[#0d0d0d]/15 pt-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-widest text-[#2d2d2d]/70">
+                          Combined / Common Subject
+                        </span>
+                        <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#2d2d2d]/60 font-semibold cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={course.common === true}
+                            onChange={(e) =>
+                              updateCourse(course.id, {
+                                common: e.target.checked || undefined,
+                              })
+                            }
+                            className="accent-[#0d0d0d]"
+                          />
+                          <span>Common</span>
+                        </label>
+                      </div>
+                      <p className="mt-1 text-[10px] text-[#2d2d2d]/50">
+                        When enabled, classes taking this same course (matching name) at the same
+                        time will not trigger a faculty schedule conflict (treated as a combined
+                        lecture).
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -4395,6 +5557,306 @@ function Index() {
           )}
         </div>
       </div>
+
+      {/* Faculty Panel Backdrop Overlay */}
+      {facultyPanelOpen && (
+        <div
+          className="fixed inset-0 z-[90] bg-[#0d0d0d]/35 backdrop-blur-[2px]"
+          onClick={() => setFacultyPanelOpen(false)}
+        />
+      )}
+      {/* Faculty Panel Drawer */}
+      <div
+        className={`fixed right-0 top-0 h-full w-[min(450px,100vw)] bg-[#f5f3ee] border-l-2 border-[#0d0d0d] shadow-[0_0_50px_rgba(0,0,0,0.3)] z-[95] flex flex-col transition-transform duration-300 ease-in-out ${
+          facultyPanelOpen ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
+        <div className="flex items-center justify-between border-b-2 border-[#0d0d0d] bg-[#0d0d0d] px-4 py-3 text-[#f5f3ee]">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-[#f5f3ee]/60">
+              Control Panel
+            </div>
+            <div
+              className="text-sm font-bold"
+              style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
+            >
+              Faculty List ({globalFaculties.length})
+            </div>
+          </div>
+          <button
+            onClick={() => setFacultyPanelOpen(false)}
+            className="border-2 border-[#f5f3ee] bg-transparent px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-[#f5f3ee] hover:bg-[#f5f3ee] hover:text-[#0d0d0d] transition"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <p className="text-xs text-[#2d2d2d]/60 mb-2">
+            Below is the list of all unique faculty members across all classes. Click **Rename** to
+            update a faculty name globally.
+          </p>
+          {globalFaculties.length === 0 ? (
+            <div className="text-xs text-[#2d2d2d]/50 italic p-4 border-2 border-dashed border-[#0d0d0d]/10 bg-white text-center">
+              No faculties assigned yet. Set them on courses.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {globalFaculties.map((fac) => {
+                const isSelected = selectedFaculty?.toLowerCase() === fac.toLowerCase();
+                const coursesHandled = (() => {
+                  const commonGroups = new Map<
+                    string,
+                    { classNames: string[]; courseName: string; weeklyPeriods: number }
+                  >();
+                  const individualList: Array<{
+                    className: string;
+                    courseName: string;
+                    weeklyPeriods: number;
+                  }> = [];
+
+                  state.classes.forEach((cls) => {
+                    cls.courses.forEach((c) => {
+                      if (c.faculty) {
+                        const names = c.faculty.split(",").map((f) => f.trim().toLowerCase());
+                        if (names.includes(fac.toLowerCase())) {
+                          if (c.common) {
+                            const key = c.name.trim().toLowerCase();
+                            const existing = commonGroups.get(key);
+                            if (existing) {
+                              if (!existing.classNames.includes(cls.name)) {
+                                existing.classNames.push(cls.name);
+                              }
+                            } else {
+                              commonGroups.set(key, {
+                                classNames: [cls.name],
+                                courseName: c.name,
+                                weeklyPeriods: courseWeeklyTarget(c),
+                              });
+                            }
+                          } else {
+                            individualList.push({
+                              className: cls.name,
+                              courseName: c.name,
+                              weeklyPeriods: courseWeeklyTarget(c),
+                            });
+                          }
+                        }
+                      }
+                    });
+                  });
+
+                  return [
+                    ...Array.from(commonGroups.values()).map((g) => ({
+                      className: g.classNames.join(", "),
+                      courseName: g.courseName + " (Common)",
+                      weeklyPeriods: g.weeklyPeriods,
+                    })),
+                    ...individualList,
+                  ];
+                })();
+
+                return (
+                  <div
+                    key={fac}
+                    className="flex flex-col border border-[#0d0d0d]/20 bg-white shadow-[3px_3px_0px_0px_rgba(13,13,13,0.1)] transition-all"
+                  >
+                    <div
+                      className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[#e8e4dd]/30"
+                      onClick={() => setSelectedFaculty(isSelected ? null : fac)}
+                    >
+                      {editingFaculty === fac ? (
+                        <input
+                          value={facultyEditVal}
+                          onChange={(e) => setFacultyEditVal(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") commitFacultyRename(fac, facultyEditVal.trim());
+                            if (e.key === "Escape") setEditingFaculty(null);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="min-w-0 flex-1 bg-transparent text-xs font-bold outline-none border-b border-[#0d0d0d]"
+                          autoFocus
+                        />
+                      ) : (
+                        <span className="min-w-0 flex-1 text-xs font-bold text-[#2d2d2d] truncate flex items-center gap-1.5">
+                          <span className="text-[10px] text-[#2d2d2d]/40 font-mono">
+                            {isSelected ? "▼" : "▶"}
+                          </span>
+                          <span>{fac}</span>
+                          <span className="text-[9px] text-[#2d2d2d]/40 font-normal">
+                            ({coursesHandled.length} course
+                            {coursesHandled.length === 1 ? "" : "s"})
+                          </span>
+                        </span>
+                      )}
+
+                      {editingFaculty === fac ? (
+                        <div
+                          className="flex items-center gap-1.5 shrink-0"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            onClick={() => commitFacultyRename(fac, facultyEditVal.trim())}
+                            className="text-[10px] font-bold text-green-700 hover:text-green-900 border border-green-700/20 px-2 py-0.5 bg-green-50"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => setEditingFaculty(null)}
+                            className="text-[10px] font-bold text-red-700 hover:text-red-900 border border-red-700/20 px-2 py-0.5 bg-red-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingFaculty(fac);
+                            setFacultyEditVal(fac);
+                          }}
+                          className="text-[10px] uppercase font-bold tracking-wider text-[#2d2d2d]/40 hover:text-[#0d0d0d] hover:underline shrink-0"
+                        >
+                          Rename
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Collapsible Details Area */}
+                    {isSelected && (
+                      <div className="border-t border-[#0d0d0d]/10 bg-[#f5f3ee]/30 p-3 space-y-2 text-xs">
+                        <div className="font-bold text-[#0d0d0d]/70 text-[10px] uppercase tracking-wider">
+                          Handled Courses
+                        </div>
+                        {coursesHandled.length === 0 ? (
+                          <div className="text-[11px] text-[#2d2d2d]/50 italic">
+                            No courses currently configured for this faculty.
+                          </div>
+                        ) : (
+                          <ul className="space-y-1 pl-1">
+                            {coursesHandled.map((ch, idx) => (
+                              <li
+                                key={idx}
+                                className="list-disc list-inside text-[11px] text-[#2d2d2d] leading-relaxed"
+                              >
+                                <span className="font-mono bg-[#0d0d0d]/5 px-1 rounded text-[10px] font-bold mr-1">
+                                  {ch.className}
+                                </span>{" "}
+                                <span>{ch.courseName}</span>{" "}
+                                <span className="text-[#2d2d2d]/60 font-semibold">
+                                  ({ch.weeklyPeriods} periods/wk)
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            exportSingleFacultyExcel(fac);
+                          }}
+                          className="mt-2 w-full flex items-center justify-center gap-1.5 border border-[#0d0d0d] bg-white px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#0d0d0d] hover:bg-[#e8e4dd] transition active:translate-y-0.5 shadow-[1px_1px_0_0_#0d0d0d]"
+                        >
+                          📥 Download {fac}'s Excel
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {courseContextMenu && (
+        <div
+          className="fixed z-[100] min-w-[140px] border-2 border-[#0d0d0d] bg-[#f5f3ee] py-1 shadow-[4px_4px_0px_0px_#0d0d0d]"
+          style={{ left: courseContextMenu.x, top: courseContextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => {
+              duplicateCourse(courseContextMenu.courseId);
+              setCourseContextMenu(null);
+            }}
+            className="flex w-full items-center px-3 py-1.5 text-left text-xs font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
+          >
+            Duplicate
+          </button>
+          <button
+            onClick={() => {
+              clearCoursePlacements(courseContextMenu.courseId);
+              setCourseContextMenu(null);
+            }}
+            className="flex w-full items-center px-3 py-1.5 text-left text-xs font-bold uppercase tracking-wider text-red-700 hover:bg-[#e8e4dd]"
+          >
+            Clear Placed
+          </button>
+          <button
+            onClick={() => {
+              setRulesFor(courseContextMenu.courseId);
+              setCourseContextMenu(null);
+            }}
+            className="flex w-full items-center px-3 py-1.5 text-left text-xs font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
+          >
+            Rules
+          </button>
+          <button
+            onClick={() => {
+              if (confirm("Remove this course and delete all its placements?")) {
+                removeCourse(courseContextMenu.courseId);
+              }
+              setCourseContextMenu(null);
+            }}
+            className="flex w-full items-center border-t border-dashed border-[#0d0d0d]/10 px-3 py-1.5 text-left text-xs font-bold uppercase tracking-wider text-red-600 hover:bg-[#e8e4dd]"
+          >
+            Delete
+          </button>
+        </div>
+      )}
+
+      {classContextMenu && (
+        <div
+          className="fixed z-[100] min-w-[140px] border-2 border-[#0d0d0d] bg-[#f5f3ee] py-1 shadow-[4px_4px_0px_0px_#0d0d0d]"
+          style={{ left: classContextMenu.x, top: classContextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => {
+              duplicateClass(classContextMenu.classId);
+              setClassContextMenu(null);
+            }}
+            className="flex w-full items-center px-3 py-1.5 text-left text-xs font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
+          >
+            Duplicate Class
+          </button>
+          <button
+            onClick={() => {
+              const name = prompt("Enter new name for the class:");
+              if (name && name.trim()) {
+                renameClass(classContextMenu.classId, name.trim());
+              }
+              setClassContextMenu(null);
+            }}
+            className="flex w-full items-center px-3 py-1.5 text-left text-xs font-bold uppercase tracking-wider hover:bg-[#e8e4dd]"
+          >
+            Rename Class
+          </button>
+          <button
+            onClick={() => {
+              if (confirm("Are you sure you want to delete this class and all its data?")) {
+                removeClass(classContextMenu.classId);
+              }
+              setClassContextMenu(null);
+            }}
+            className="flex w-full items-center border-t border-dashed border-[#0d0d0d]/10 px-3 py-1.5 text-left text-xs font-bold uppercase tracking-wider text-red-600 hover:bg-[#e8e4dd]"
+          >
+            Delete Class
+          </button>
+        </div>
+      )}
     </div>
   );
 }
