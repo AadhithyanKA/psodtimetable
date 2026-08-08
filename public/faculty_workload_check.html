@@ -1428,38 +1428,77 @@
         daysList.forEach((date) => {
           nonBreakSlots.forEach(({ idx: slotIdx, pNum, sl }) => {
             const facMap = new Map();
+            const roomMap = new Map();
+
             appState.classes.forEach((cls) => {
               const cell = cls.grid[`${date}-${slotIdx}`];
               if (cell?.kind === "course") {
                 const crs = cls.courses.find((x) => x.id === cell.courseId);
-                if (crs && crs.faculty) {
-                  const names = crs.faculty.split(/[,;/]+/).map((f) => f.trim());
-                  names.forEach((fac) => {
-                    const list = facMap.get(fac.toLowerCase()) || [];
-                    list.push({ facName: fac, clsName: cls.name, courseName: crs.name });
-                    facMap.set(fac.toLowerCase(), list);
+                if (crs) {
+                  if (crs.faculty) {
+                    const names = crs.faculty.split(/[,;/]+/).map((f) => f.trim());
+                    names.forEach((fac) => {
+                      const list = facMap.get(fac.toLowerCase()) || [];
+                      list.push({ facName: fac, clsName: cls.name, crs });
+                      facMap.set(fac.toLowerCase(), list);
+                    });
+                  }
+                  if (crs.classroom && crs.classroom.trim()) {
+                    const rm = crs.classroom.trim();
+                    const list = roomMap.get(rm.toLowerCase()) || [];
+                    list.push({ roomName: rm, clsName: cls.name, crs });
+                    roomMap.set(rm.toLowerCase(), list);
+                  }
+                }
+              }
+            });
+
+            // Faculty conflicts check
+            facMap.forEach((list) => {
+              if (list.length > 1) {
+                const isCommon = list.every(
+                  (item, _, arr) =>
+                    (item.crs.common || arr[0].crs.common) &&
+                    item.crs.name.toLowerCase().trim() === arr[0].crs.name.toLowerCase().trim(),
+                );
+                if (!isCommon) {
+                  conflicts.push({
+                    type: "Faculty Double Booking",
+                    date,
+                    pNum,
+                    time: `${sl.start} - ${sl.end}`,
+                    facName: list[0].facName,
+                    classes: list.map((l) => `${l.clsName} (${l.crs.name})`).join(", "),
                   });
                 }
               }
             });
 
-            facMap.forEach((list) => {
+            // Classroom conflicts check
+            roomMap.forEach((list) => {
               if (list.length > 1) {
-                conflicts.push({
-                  type: "Double Booking Conflict",
-                  date,
-                  pNum,
-                  time: `${sl.start} - ${sl.end}`,
-                  facName: list[0].facName,
-                  classes: list.map((l) => `${l.clsName} (${l.courseName})`).join(", "),
-                });
+                const isCommon = list.every(
+                  (item, _, arr) =>
+                    (item.crs.common || arr[0].crs.common) &&
+                    item.crs.name.toLowerCase().trim() === arr[0].crs.name.toLowerCase().trim(),
+                );
+                if (!isCommon) {
+                  conflicts.push({
+                    type: "Classroom Overlap",
+                    date,
+                    pNum,
+                    time: `${sl.start} - ${sl.end}`,
+                    facName: `Room: ${list[0].roomName}`,
+                    classes: list.map((l) => `${l.clsName} (${l.crs.name})`).join(", "),
+                  });
+                }
               }
             });
           });
         });
 
         if (conflicts.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="6" style="padding: 3rem; text-align: center; color: var(--color-free-text); font-weight: 700;">✅ Perfect Schedule! No faculty double-booking conflicts detected in this .aadhi snapshot.</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="6" style="padding: 3rem; text-align: center; color: var(--color-free-text); font-weight: 700;">✅ Perfect Schedule! No double-booking or classroom conflicts detected in this .aadhi snapshot.</td></tr>`;
           return;
         }
 

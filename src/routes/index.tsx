@@ -129,6 +129,7 @@ type State = {
   // conflict/override warnings are suppressed so overrides become permanent.
   frozen?: boolean;
   ignoredConflicts?: string[]; // keys of conflicts ignored by the user
+  ignoreClassroomConflicts?: boolean; // toggle to suppress/bypass all classroom overlap conflicts
 };
 
 const COLORS = [
@@ -269,6 +270,17 @@ const sharesFaculty = (a: Pick<Course, "faculty">, b: Pick<Course, "faculty">): 
   const set = new Set(getFaculties(a));
   return getFaculties(b).some((f) => set.has(f));
 };
+const sharesClassroom = (a: Pick<Course, "classroom">, b: Pick<Course, "classroom">): boolean => {
+  const roomA = (a.classroom || "").trim().toLowerCase();
+  const roomB = (b.classroom || "").trim().toLowerCase();
+  if (!roomA || !roomB) return false;
+  return roomA === roomB;
+};
+const isSameCommonCourse = (a: Course, b: Course): boolean => {
+  const isCommon = Boolean(a.common || b.common);
+  const sameName = a.name.toLowerCase().trim() === b.name.toLowerCase().trim();
+  return isCommon && sameName;
+};
 const courseAllowedDate = (course: Course, iso: string): boolean => {
   if (course.fromDate && iso < course.fromDate) return false;
   if (course.toDate && iso > course.toDate) return false;
@@ -369,6 +381,7 @@ function defaultState(from = isoToday()): State {
       { id: "k2", name: "Class B", grid: mkGrid(), courses: cloneCourses() },
     ],
     ignoredConflicts: [],
+    ignoreClassroomConflicts: false,
   };
 }
 
@@ -571,6 +584,7 @@ const normalizeStateSnapshot = (snapshot: SavedState): State => {
     classes,
     frozen: Boolean(snapshot.frozen),
     ignoredConflicts: Array.isArray(snapshot.ignoredConflicts) ? snapshot.ignoredConflicts : [],
+    ignoreClassroomConflicts: Boolean(snapshot.ignoreClassroomConflicts),
   };
 };
 
@@ -778,10 +792,92 @@ function Index() {
     x: number;
     y: number;
   } | null>(null);
+
+  const [conflictToasts, setConflictToasts] = useState<
+    Array<{ id: string; message: string; timestamp: string }>
+  >([]);
+
+  const showConflictToast = useCallback((message: string) => {
+    const id = Math.random().toString(36).substring(2, 9);
+    const timestamp = new Date().toLocaleTimeString();
+    setConflictToasts((prev) => [...prev, { id, message, timestamp }]);
+    setTimeout(() => {
+      setConflictToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 5000);
+  }, []);
+
+  const removeConflictToast = (id: string) => {
+    setConflictToasts((prev) => prev.filter((t) => t.id !== id));
+  };
   const [facultyPanelOpen, setFacultyPanelOpen] = useState(false);
   const [controlPanelOpen, setControlPanelOpen] = useState(false);
+  const [controlPanelTab, setControlPanelTab] = useState<"classes" | "common">("classes");
+  const [commonCourseSearch, setCommonCourseSearch] = useState<string>("");
   const [expandedControlClass, setExpandedControlClass] = useState<string | null>(null);
   const [selectedFaculty, setSelectedFaculty] = useState<string | null>(null);
+
+  const setClassroomForWholeClass = (classId: string, roomName: string) => {
+    setState((s) => ({
+      ...s,
+      classes: s.classes.map((cls) => {
+        if (cls.id !== classId) return cls;
+        return {
+          ...cls,
+          courses: cls.courses.map((crs) => ({ ...crs, classroom: roomName })),
+        };
+      }),
+    }));
+  };
+
+  const setClassroomForCommonCourseGroup = (commonCourseName: string, roomName: string) => {
+    const targetName = commonCourseName.trim().toLowerCase();
+    setState((s) => ({
+      ...s,
+      classes: s.classes.map((cls) => ({
+        ...cls,
+        courses: cls.courses.map((crs) => {
+          if (crs.common && crs.name.trim().toLowerCase() === targetName) {
+            return { ...crs, classroom: roomName };
+          }
+          return crs;
+        }),
+      })),
+    }));
+  };
+
+  const commonCourseGroups = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        name: string;
+        classroom: string;
+        faculties: Set<string>;
+        classes: Array<{ classId: string; className: string; courseId: string }>;
+      }
+    >();
+
+    state.classes.forEach((cls) => {
+      cls.courses.forEach((c) => {
+        if (c.common) {
+          const key = c.name.trim().toLowerCase();
+          const existing = map.get(key) || {
+            name: c.name,
+            classroom: c.classroom || "",
+            faculties: new Set(),
+            classes: [],
+          };
+          if (c.classroom && !existing.classroom) existing.classroom = c.classroom;
+          if (c.faculty) {
+            c.faculty.split(/[,;/]+/).forEach((f) => existing.faculties.add(f.trim()));
+          }
+          existing.classes.push({ classId: cls.id, className: cls.name, courseId: c.id });
+          map.set(key, existing);
+        }
+      });
+    });
+
+    return Array.from(map.values());
+  }, [state.classes]);
   const [editingFaculty, setEditingFaculty] = useState<string | null>(null);
   const [facultyEditVal, setFacultyEditVal] = useState("");
   const gridRef = useRef<HTMLDivElement>(null);
@@ -1041,12 +1137,9 @@ function Index() {
               const a = assignments[aIdx];
               const b = assignments[bIdx];
               if (a.classId !== b.classId) {
-                const isSameCommonCourse =
-                  a.course.common &&
-                  b.course.common &&
-                  a.course.name.toLowerCase().trim() === b.course.name.toLowerCase().trim();
+                const isSameCommon = isSameCommonCourse(a.course, b.course);
 
-                if (!isSameCommonCourse) {
+                if (!isSameCommon) {
                   const keyStrA = `${a.classId}:${key}`;
                   const keyStrB = `${b.classId}:${key}`;
                   if (!state.ignoredConflicts?.includes(keyStrA)) {
@@ -1060,6 +1153,49 @@ function Index() {
             }
           }
         });
+
+        // Classroom conflicts
+        if (!state.ignoreClassroomConflicts) {
+          const classroomToAssignments: Record<
+            string,
+            Array<{ classId: string; course: Course }>
+          > = {};
+
+          state.classes.forEach((cls) => {
+            const cell = cls.grid[key];
+            if (cell?.kind === "course") {
+              const course = cls.courses.find((c) => c.id === cell.courseId);
+              if (!course) return;
+              const room = (course.classroom || "").trim().toLowerCase();
+              if (room) {
+                (classroomToAssignments[room] ??= []).push({ classId: cls.id, course });
+              }
+            }
+          });
+
+          Object.entries(classroomToAssignments).forEach(([_, assignments]) => {
+            for (let aIdx = 0; aIdx < assignments.length; aIdx++) {
+              for (let bIdx = aIdx + 1; bIdx < assignments.length; bIdx++) {
+                const a = assignments[aIdx];
+                const b = assignments[bIdx];
+                if (a.classId !== b.classId) {
+                  const isSameCommon = isSameCommonCourse(a.course, b.course);
+
+                  if (!isSameCommon) {
+                    const keyStrA = `${a.classId}:${key}`;
+                    const keyStrB = `${b.classId}:${key}`;
+                    if (!state.ignoredConflicts?.includes(keyStrA)) {
+                      set.add(keyStrA);
+                    }
+                    if (!state.ignoredConflicts?.includes(keyStrB)) {
+                      set.add(keyStrB);
+                    }
+                  }
+                }
+              }
+            }
+          });
+        }
       });
     });
     return set;
@@ -1140,11 +1276,8 @@ function Index() {
             const a = assignments[aIdx];
             const matchingClashes = assignments.filter((b) => {
               if (a.classId === b.classId) return false;
-              const isSameCommonCourse =
-                a.course.common &&
-                b.course.common &&
-                a.course.name.toLowerCase().trim() === b.course.name.toLowerCase().trim();
-              return !isSameCommonCourse;
+              const isSameCommon = isSameCommonCourse(a.course, b.course);
+              return !isSameCommon;
             });
 
             if (matchingClashes.length > 0) {
@@ -1171,6 +1304,65 @@ function Index() {
             }
           }
         });
+
+        // Classroom conflicts
+        if (!state.ignoreClassroomConflicts) {
+          const classroomToAssignments: Record<
+            string,
+            Array<{ classId: string; className: string; course: Course }>
+          > = {};
+
+          state.classes.forEach((cls) => {
+            const cell = cls.grid[key];
+            if (cell?.kind === "course") {
+              const course = cls.courses.find((c) => c.id === cell.courseId);
+              if (!course) return;
+              const room = (course.classroom || "").trim();
+              if (room) {
+                (classroomToAssignments[room.toLowerCase()] ??= []).push({
+                  classId: cls.id,
+                  className: cls.name,
+                  course,
+                });
+              }
+            }
+          });
+
+          Object.entries(classroomToAssignments).forEach(([_, assignments]) => {
+            for (let aIdx = 0; aIdx < assignments.length; aIdx++) {
+              const a = assignments[aIdx];
+              const matchingClashes = assignments.filter((b) => {
+                if (a.classId === b.classId) return false;
+                const isSameCommon = isSameCommonCourse(a.course, b.course);
+                return !isSameCommon;
+              });
+
+              if (matchingClashes.length > 0) {
+                const keyStr = `${a.classId}:${key}`;
+                if (!state.ignoredConflicts?.includes(keyStr)) {
+                  const roomName = a.course.classroom || "Classroom";
+                  const others = matchingClashes
+                    .map((b) => `"${b.course.name || b.course.id}" in ${b.className}`)
+                    .join(" & ");
+
+                  list.push({
+                    id: `${a.classId}:${key}:classroom:${roomName}`,
+                    classId: a.classId,
+                    className: a.className,
+                    date,
+                    weekday: dayName,
+                    slotIdx: i,
+                    periodLabel: periodLabelFor(i),
+                    type: "rule",
+                    faculty: roomName,
+                    courseName: a.course.name || a.course.id,
+                    description: `Classroom "${roomName}" is double-booked by "${a.course.name || a.course.id}" here, and ${others}.`,
+                  });
+                }
+              }
+            }
+          });
+        }
       });
     });
 
@@ -1185,42 +1377,96 @@ function Index() {
 
   const applyTool = (date: string, slotIdx: number, tool: Tool, isIntermediate = false) => {
     if (state.frozen) {
-      setAutoFillReport("Timetable is frozen — unfreeze to make changes.");
+      const msg = "Timetable is frozen — unfreeze to make changes.";
+      setAutoFillReport(msg);
+      showConflictToast(msg);
       return;
     }
     if (tool.kind === "course") {
       const active = state.classes.find((c) => c.id === activeClassId);
       const course = active?.courses.find((c) => c.id === tool.courseId);
-      if (!active || !course || (!overrideMode && !courseAllowedOn(course, date))) {
-        setAutoFillReport("Cannot place course — this date is outside its rules.");
+      if (!active || !course) return;
+
+      if (!overrideMode && !courseAllowedOn(course, date)) {
+        const msg = `Cannot place "${course.name}" — date ${date} is outside course date rules.`;
+        setAutoFillReport(msg);
+        showConflictToast(msg);
         return;
       }
       const span = cleanDurationSlots(course.durationSlots, state.slots);
       for (let k = 0; k < span; k++) {
         const idx = slotIdx + k;
-        if (
-          idx >= state.slots.length ||
-          state.slots[idx]?.isBreak ||
-          (!overrideMode && !courseAllowedSlotOn(course, idx, date))
-        ) {
-          setAutoFillReport(
-            "Cannot place course — the full session must fit only inside selected rule periods.",
-          );
+        if (idx >= state.slots.length) {
+          const msg = `Cannot place "${course.name}" — session extends beyond available time slots.`;
+          setAutoFillReport(msg);
+          showConflictToast(msg);
+          return;
+        }
+        if (state.slots[idx]?.isBreak) {
+          const msg = `Cannot place "${course.name}" — period ${periodLabelFor(idx)} is a designated Break.`;
+          setAutoFillReport(msg);
+          showConflictToast(msg);
+          return;
+        }
+        if (!overrideMode && !courseAllowedSlotOn(course, idx, date)) {
+          const msg = `Cannot place "${course.name}" — period ${periodLabelFor(idx)} is not allowed by course rules.`;
+          setAutoFillReport(msg);
+          showConflictToast(msg);
           return;
         }
         const key = `${date}-${idx}`;
+
+        // Faculty double-booking conflict check
+        let facultyConflictMsg = "";
         const facultyBusy = state.classes.some((cls) => {
           if (cls.id === activeClassId) return false;
           const cell = cls.grid[key];
           if (cell?.kind !== "course") return false;
           const otherCourse = cls.courses.find((c) => c.id === cell.courseId);
-          return otherCourse ? sharesFaculty(otherCourse, course) : false;
+          if (otherCourse && sharesFaculty(otherCourse, course)) {
+            if (!isSameCommonCourse(course, otherCourse)) {
+              const facName = course.faculty || "Faculty";
+              facultyConflictMsg = `Faculty conflict: "${facName}" is already teaching "${otherCourse.name}" in ${cls.name} at ${date} (${periodLabelFor(idx)}).`;
+              return true;
+            }
+          }
+          return false;
         });
+
         if (facultyBusy && !overrideMode) {
-          setAutoFillReport(
-            "Cannot place course — this faculty is already assigned in another class at that time.",
-          );
+          const msg =
+            facultyConflictMsg ||
+            "Cannot place course — this faculty is already assigned in another class at that time.";
+          setAutoFillReport(msg);
+          showConflictToast(msg);
           return;
+        }
+
+        // Classroom overlap conflict check
+        if (!state.ignoreClassroomConflicts && !overrideMode) {
+          let roomConflictMsg = "";
+          const roomBusy = state.classes.some((cls) => {
+            if (cls.id === activeClassId) return false;
+            const cell = cls.grid[key];
+            if (cell?.kind !== "course") return false;
+            const otherCourse = cls.courses.find((c) => c.id === cell.courseId);
+            if (otherCourse && sharesClassroom(otherCourse, course)) {
+              if (!isSameCommonCourse(course, otherCourse)) {
+                roomConflictMsg = `Classroom conflict: Room "${course.classroom}" is already in use by "${otherCourse.name}" in ${cls.name} at ${date} (${periodLabelFor(idx)}).`;
+                return true;
+              }
+            }
+            return false;
+          });
+
+          if (roomBusy) {
+            const msg =
+              roomConflictMsg ||
+              "Cannot place course — classroom is already occupied by another class at that time.";
+            setAutoFillReport(msg);
+            showConflictToast(msg);
+            return;
+          }
         }
       }
     }
@@ -2414,7 +2660,8 @@ function Index() {
             const LT = Math.max(0, c.lectureHours ?? 0) + Math.max(0, c.tutorialHours ?? 0);
             const isPractical = P > 0 && (LT === 0 || (c.durationSlots ?? 1) >= 2);
             const code = isPractical ? `${c.name}_P` : c.name;
-            row.push(`${code} (${c.faculty})`);
+            const roomTag = c.classroom?.trim() ? ` [${c.classroom.trim()}]` : "";
+            row.push(`${code} (${c.faculty})${roomTag}`);
           }
         } else row.push("");
       });
@@ -2522,15 +2769,16 @@ function Index() {
       return hits;
     });
 
-    const header: (string | number)[] = [
-      "#",
-      "Course",
+    const header = [
+      "Sl. No.",
+      "Course Code / Name",
       "Faculty",
+      "Classroom",
       "L",
       "T",
       "P",
       "C",
-      "Periods/Wk",
+      "Weekly Periods",
       ...weeks.map((w) => `W${w}`),
     ];
     const rows: (string | number)[][] = [header];
@@ -2544,6 +2792,7 @@ function Index() {
         idx + 1,
         course.name,
         course.faculty || "",
+        course.classroom || "",
         L || "",
         T || "",
         P || "",
@@ -2768,7 +3017,8 @@ function Index() {
             Math.max(0, course.lectureHours ?? 0) + Math.max(0, course.tutorialHours ?? 0);
           const isPractical = P2 > 0 && (LT2 === 0 || (course.durationSlots ?? 1) >= 2);
           const code = isPractical ? `${course.name}_P` : course.name;
-          row.push(`${code} (${course.faculty})`);
+          const roomTag = course.classroom?.trim() ? ` [${course.classroom.trim()}]` : "";
+          row.push(`${code} (${course.faculty})${roomTag}`);
         } else {
           row.push("");
         }
@@ -2898,7 +3148,10 @@ function Index() {
           return;
         }
         const matches: string[] = [];
-        const commonMap = new Map<string, { classNames: string[]; courseName: string }>();
+        const commonMap = new Map<
+          string,
+          { classNames: string[]; courseName: string; roomTag: string }
+        >();
         const individualMatches: string[] = [];
 
         state.classes.forEach((cls) => {
@@ -2908,6 +3161,7 @@ function Index() {
             if (course && course.faculty) {
               const names = course.faculty.split(",").map((f) => f.trim().toLowerCase());
               if (names.includes(faculty.toLowerCase())) {
+                const roomTag = course.classroom?.trim() ? ` [${course.classroom.trim()}]` : "";
                 if (course.common) {
                   const key = course.name.trim().toLowerCase();
                   const existing = commonMap.get(key);
@@ -2916,10 +3170,14 @@ function Index() {
                       existing.classNames.push(cls.name);
                     }
                   } else {
-                    commonMap.set(key, { classNames: [cls.name], courseName: course.name });
+                    commonMap.set(key, {
+                      classNames: [cls.name],
+                      courseName: course.name,
+                      roomTag,
+                    });
                   }
                 } else {
-                  individualMatches.push(`${cls.name} - ${course.name}`);
+                  individualMatches.push(`${cls.name} - ${course.name}${roomTag}`);
                 }
               }
             }
@@ -2928,7 +3186,7 @@ function Index() {
 
         // Format common groups
         commonMap.forEach((val) => {
-          matches.push(`${val.classNames.join(", ")} - ${val.courseName}`);
+          matches.push(`${val.classNames.join(", ")} - ${val.courseName}${val.roomTag}`);
         });
         // Add individual ones
         matches.push(...individualMatches);
@@ -3087,6 +3345,7 @@ function Index() {
       "Course Code",
       "Course Name",
       "Faculty",
+      "Classroom",
       "L",
       "T",
       "P",
@@ -3096,7 +3355,7 @@ function Index() {
       ...dateHeaders,
     ];
 
-    const META_COL_COUNT = 11;
+    const META_COL_COUNT = 12;
 
     const rows: (string | number)[][] = [HEADER];
     type CellMeta =
@@ -3135,6 +3394,7 @@ function Index() {
           code,
           courseName,
           facName,
+          course.classroom || "",
           L,
           T,
           P,
@@ -3546,6 +3806,7 @@ function Index() {
       "Class",
       "Course Code",
       "Faculty",
+      "Classroom",
       "L",
       "T",
       "P",
@@ -3554,11 +3815,11 @@ function Index() {
       "Placed Classes",
       "Missing",
     ];
-    const COL_WIDTHS = [5, 22, 30, 22, 5, 5, 5, 5, 14, 14, 12];
+    const COL_WIDTHS = [5, 22, 30, 22, 18, 5, 5, 5, 5, 14, 14, 12];
     // Column indices for data checks
-    const COL_TOTAL = 8;
-    const COL_PLACED = 9;
-    const COL_MISSING = 10;
+    const COL_TOTAL = 9;
+    const COL_PLACED = 10;
+    const COL_MISSING = 11;
 
     const headerStyle: Record<string, unknown> = {
       alignment: { horizontal: "center", vertical: "center", wrapText: true },
@@ -3601,6 +3862,7 @@ function Index() {
             cls.name,
             course.name,
             course.faculty || "",
+            course.classroom || "",
             L,
             T,
             P,
@@ -5576,6 +5838,9 @@ function Index() {
                                   >
                                     {isConflict ? "Conflict · " : ""}
                                     {course?.faculty ?? ""}
+                                    {course?.classroom?.trim()
+                                      ? ` · 🚪 ${course.classroom.trim()}`
+                                      : ""}
                                   </div>
                                 </div>
                               )}
@@ -6739,199 +7004,394 @@ function Index() {
           >
             🚀 Open Workload Check App ↗
           </a>
+          <label className="shrink-0 flex items-center gap-1.5 border-2 border-[#7c3aed] bg-[#f5f3ee] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#7c3aed] cursor-pointer hover:bg-[#ede9fe] transition active:translate-y-0.5 shadow-[2px_2px_0_0_#7c3aed]">
+            <input
+              type="checkbox"
+              checked={!!state.ignoreClassroomConflicts}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setState((s) => ({ ...s, ignoreClassroomConflicts: checked }));
+              }}
+              className="w-3.5 h-3.5 accent-[#7c3aed] cursor-pointer"
+            />
+            <span>🚫 Ignore Classroom Conflicts</span>
+          </label>
+        </div>
+
+        {/* Navigation Tabs inside Control Panel */}
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-[#7c3aed]/20 bg-[#faf8ff]">
+          <button
+            onClick={() => setControlPanelTab("classes")}
+            className={`px-3 py-1 text-xs font-bold uppercase tracking-wider transition ${
+              controlPanelTab === "classes"
+                ? "bg-[#7c3aed] text-white shadow-[2px_2px_0_0_#0d0d0d]"
+                : "bg-white text-[#7c3aed] border border-[#7c3aed]/30 hover:bg-[#ede9fe]"
+            }`}
+          >
+            🏫 All Classes & Courses
+          </button>
+          <button
+            onClick={() => setControlPanelTab("common")}
+            className={`px-3 py-1 text-xs font-bold uppercase tracking-wider transition ${
+              controlPanelTab === "common"
+                ? "bg-[#7c3aed] text-white shadow-[2px_2px_0_0_#0d0d0d]"
+                : "bg-white text-[#7c3aed] border border-[#7c3aed]/30 hover:bg-[#ede9fe]"
+            }`}
+          >
+            🤝 Common Courses ({commonCourseGroups.length})
+          </button>
         </div>
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {state.classes.length === 0 ? (
-            <div className="text-xs text-[#2d2d2d]/50 italic p-4 border-2 border-dashed border-[#7c3aed]/20 bg-white text-center">
-              No classes yet. Add a class to get started.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {state.classes.map((cls) => {
-                const isExpanded = expandedControlClass === cls.id;
-                return (
-                  <div
-                    key={cls.id}
-                    className="border border-[#7c3aed]/20 bg-white shadow-[2px_2px_0px_0px_rgba(124,58,237,0.12)]"
-                  >
-                    {/* Class row */}
-                    <div className="flex flex-col border-b border-[#7c3aed]/10">
-                      <div className="flex items-center gap-2 px-3 py-2 bg-[#ede9fe]/40">
-                        <button
-                          onClick={() => setExpandedControlClass(isExpanded ? null : cls.id)}
-                          className="min-w-0 flex-1 flex items-center gap-2 text-left"
-                        >
-                          <span className="text-[10px] text-[#7c3aed]/50 font-mono shrink-0">
-                            {isExpanded ? "▼" : "▶"}
-                          </span>
-                          <span
-                            className="text-xs font-bold text-[#2d2d2d] truncate"
-                            style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
-                          >
-                            {cls.name}
-                          </span>
-                          <span className="text-[9px] text-[#2d2d2d]/40 font-normal shrink-0">
-                            ({cls.courses.length} course{cls.courses.length === 1 ? "" : "s"})
-                          </span>
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            exportClassTimetable(cls);
-                          }}
-                          className="shrink-0 flex items-center gap-1 border border-[#7c3aed]/40 bg-[#ede9fe] px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-[#7c3aed] hover:bg-[#ddd6fe] transition active:translate-y-0.5"
-                          title="Download class timetable (Summary + Timetable)"
-                        >
-                          📊 Class
-                        </button>
-                      </div>
-                      {/* Department row */}
-                      <div className="flex items-center gap-2 px-3 pb-2 bg-[#ede9fe]/20">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-[#7c3aed]/50 shrink-0">
-                          Dept:
-                        </span>
-                        <input
-                          type="text"
-                          value={cls.department ?? ""}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setState((s) => ({
-                              ...s,
-                              classes: s.classes.map((cl) =>
-                                cl.id === cls.id ? { ...cl, department: val } : cl,
-                              ),
-                            }));
-                          }}
-                          placeholder="e.g. Computer Science"
-                          className="min-w-0 flex-1 bg-white border border-[#7c3aed]/20 px-2 py-0.5 text-[10px] text-[#2d2d2d] placeholder:text-[#2d2d2d]/30 outline-none focus:border-[#7c3aed]/60 focus:ring-0 rounded-none"
-                        />
-                        {cls.department?.trim() && (
-                          <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 bg-[#7c3aed] text-white rounded">
-                            {cls.department.trim()}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Courses list */}
-                    {isExpanded && (
-                      <div className="divide-y divide-[#7c3aed]/5">
-                        {cls.courses.length === 0 ? (
-                          <div className="px-4 py-3 text-[11px] text-[#2d2d2d]/40 italic">
-                            No courses in this class.
-                          </div>
-                        ) : (
-                          cls.courses.map((course) => {
-                            const courseFaculties = course.faculty
-                              ? course.faculty
-                                  .split(",")
-                                  .map((f) => f.trim())
-                                  .filter(Boolean)
-                              : [];
-                            const hasLTPC =
-                              (course.lectureHours ?? 0) +
-                                (course.tutorialHours ?? 0) +
-                                (course.practicalHours ?? 0) >
-                              0;
-                            return (
-                              <div
-                                key={course.id}
-                                className="flex items-start gap-2 px-3 py-2.5 hover:bg-[#faf8ff] transition"
+          {controlPanelTab === "classes" && (
+            <>
+              {state.classes.length === 0 ? (
+                <div className="text-xs text-[#2d2d2d]/50 italic p-4 border-2 border-dashed border-[#7c3aed]/20 bg-white text-center">
+                  No classes yet. Add a class to get started.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {state.classes.map((cls) => {
+                    const isExpanded = expandedControlClass === cls.id;
+                    return (
+                      <div
+                        key={cls.id}
+                        className="border border-[#7c3aed]/20 bg-white shadow-[2px_2px_0px_0px_rgba(124,58,237,0.12)]"
+                      >
+                        {/* Class row */}
+                        <div className="flex flex-col border-b border-[#7c3aed]/10">
+                          <div className="flex items-center gap-2 px-3 py-2 bg-[#ede9fe]/40">
+                            <button
+                              onClick={() => setExpandedControlClass(isExpanded ? null : cls.id)}
+                              className="min-w-0 flex-1 flex items-center gap-2 text-left"
+                            >
+                              <span className="text-[10px] text-[#7c3aed]/50 font-mono shrink-0">
+                                {isExpanded ? "▼" : "▶"}
+                              </span>
+                              <span
+                                className="text-xs font-bold text-[#2d2d2d] truncate"
+                                style={{ fontFamily: "'Sora', system-ui, sans-serif" }}
                               >
-                                {/* Color swatch */}
-                                <div
-                                  className="w-3 h-3 rounded-full shrink-0 mt-0.5 border border-[#0d0d0d]/10"
-                                  style={{ backgroundColor: course.color }}
-                                />
-                                {/* Info */}
-                                <div className="min-w-0 flex-1">
-                                  <div className="text-[11px] font-bold text-[#2d2d2d] truncate">
-                                    {course.name}
-                                    {course.common && (
-                                      <span className="ml-1.5 text-[9px] font-bold text-[#0369a1] bg-[#e0f2fe] px-1 py-0.5 rounded">
+                                {cls.name}
+                              </span>
+                              <span className="text-[9px] text-[#2d2d2d]/40 font-normal shrink-0">
+                                ({cls.courses.length} course{cls.courses.length === 1 ? "" : "s"})
+                              </span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                exportClassTimetable(cls);
+                              }}
+                              className="shrink-0 flex items-center gap-1 border border-[#7c3aed]/40 bg-[#ede9fe] px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-[#7c3aed] hover:bg-[#ddd6fe] transition active:translate-y-0.5"
+                              title="Download class timetable (Summary + Timetable)"
+                            >
+                              📊 Class
+                            </button>
+                          </div>
+                          {/* Department row */}
+                          <div className="flex items-center gap-2 px-3 pb-2 bg-[#ede9fe]/20">
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-[#7c3aed]/50 shrink-0">
+                              Dept:
+                            </span>
+                            <input
+                              type="text"
+                              value={cls.department ?? ""}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setState((s) => ({
+                                  ...s,
+                                  classes: s.classes.map((cl) =>
+                                    cl.id === cls.id ? { ...cl, department: val } : cl,
+                                  ),
+                                }));
+                              }}
+                              placeholder="e.g. Computer Science"
+                              className="min-w-0 flex-1 bg-white border border-[#7c3aed]/20 px-2 py-0.5 text-[10px] text-[#2d2d2d] placeholder:text-[#2d2d2d]/30 outline-none focus:border-[#7c3aed]/60 focus:ring-0 rounded-none"
+                            />
+                            {cls.department?.trim() && (
+                              <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 bg-[#7c3aed] text-white rounded">
+                                {cls.department.trim()}
+                              </span>
+                            )}
+                          </div>
+                          {/* Bulk Class Classroom row */}
+                          <div className="flex items-center gap-2 px-3 pb-2 bg-[#ede9fe]/20">
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-[#7c3aed]/50 shrink-0">
+                              Classroom:
+                            </span>
+                            <input
+                              type="text"
+                              placeholder="Bulk Room for class (e.g. Lab 301)"
+                              className="min-w-0 flex-1 bg-white border border-[#7c3aed]/20 px-2 py-0.5 text-[10px] text-[#2d2d2d] placeholder:text-[#2d2d2d]/30 outline-none focus:border-[#7c3aed]/60"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  const val = (e.target as HTMLInputElement).value;
+                                  if (val && val.trim()) {
+                                    setClassroomForWholeClass(cls.id, val.trim());
+                                    (e.target as HTMLInputElement).value = "";
+                                  }
+                                }
+                              }}
+                            />
+                            <button
+                              onClick={(e) => {
+                                const input = e.currentTarget
+                                  .previousElementSibling as HTMLInputElement;
+                                if (input && input.value.trim()) {
+                                  setClassroomForWholeClass(cls.id, input.value.trim());
+                                  input.value = "";
+                                }
+                              }}
+                              className="shrink-0 text-[9px] font-bold uppercase px-2 py-0.5 bg-[#7c3aed] text-white hover:bg-[#6d28d9] transition shadow-[1px_1px_0_0_#0d0d0d]"
+                              title="Set this classroom for all courses in this class"
+                            >
+                              Apply to Class
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Courses list */}
+                        {isExpanded && (
+                          <div className="divide-y divide-[#7c3aed]/5">
+                            {cls.courses.length === 0 ? (
+                              <div className="px-4 py-3 text-[11px] text-[#2d2d2d]/40 italic">
+                                No courses in this class.
+                              </div>
+                            ) : (
+                              cls.courses.map((course) => {
+                                const courseFaculties = course.faculty
+                                  ? course.faculty
+                                      .split(",")
+                                      .map((f) => f.trim())
+                                      .filter(Boolean)
+                                  : [];
+                                const hasLTPC =
+                                  (course.lectureHours ?? 0) +
+                                    (course.tutorialHours ?? 0) +
+                                    (course.practicalHours ?? 0) >
+                                  0;
+                                return (
+                                  <div
+                                    key={course.id}
+                                    className="flex items-start gap-2 px-3 py-2.5 hover:bg-[#faf8ff] transition"
+                                  >
+                                    {/* Color swatch */}
+                                    <div
+                                      className="w-3 h-3 rounded-full shrink-0 mt-0.5 border border-[#0d0d0d]/10"
+                                      style={{ backgroundColor: course.color }}
+                                    />
+                                    {/* Info */}
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-[11px] font-bold text-[#2d2d2d] truncate">
+                                        {course.name}
+                                        {course.common && (
+                                          <span className="ml-1.5 text-[9px] font-bold text-[#0369a1] bg-[#e0f2fe] px-1 py-0.5 rounded">
+                                            Common
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[9px] text-[#2d2d2d]/50 truncate mt-0.5">
+                                        {course.faculty || (
+                                          <span className="italic">No faculty</span>
+                                        )}
+                                        {hasLTPC && (
+                                          <span className="ml-1.5 font-mono text-[#7c3aed]/70">
+                                            L{course.lectureHours ?? 0}T{course.tutorialHours ?? 0}P
+                                            {course.practicalHours ?? 0}C{course.credits ?? 0}
+                                          </span>
+                                        )}
+                                      </div>
+                                      {/* Particular course classroom input */}
+                                      <div className="flex items-center gap-1.5 mt-1">
+                                        <span className="text-[9px] font-bold text-[#7c3aed]/60 uppercase">
+                                          Room:
+                                        </span>
+                                        <input
+                                          type="text"
+                                          value={course.classroom ?? ""}
+                                          onChange={(e) => {
+                                            const val = e.target.value;
+                                            setState((s) => ({
+                                              ...s,
+                                              classes: s.classes.map((cl) =>
+                                                cl.id === cls.id
+                                                  ? {
+                                                      ...cl,
+                                                      courses: cl.courses.map((co) =>
+                                                        co.id === course.id
+                                                          ? { ...co, classroom: val }
+                                                          : co,
+                                                      ),
+                                                    }
+                                                  : cl,
+                                              ),
+                                            }));
+                                          }}
+                                          placeholder="e.g. Room 302"
+                                          className="w-28 bg-white border border-[#7c3aed]/20 px-1.5 py-0.5 text-[9px] font-mono text-[#2d2d2d] placeholder:text-[#2d2d2d]/30 outline-none focus:border-[#7c3aed]"
+                                        />
+                                      </div>
+                                    </div>
+                                    {/* Common toggle */}
+                                    <label
+                                      className="shrink-0 flex items-center gap-1 cursor-pointer mt-0.5"
+                                      title="Toggle as common / combined course across classes"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={!!course.common}
+                                        onChange={(e) => {
+                                          e.stopPropagation();
+                                          setState((s) => ({
+                                            ...s,
+                                            classes: s.classes.map((cl) =>
+                                              cl.id === cls.id
+                                                ? {
+                                                    ...cl,
+                                                    courses: cl.courses.map((co) =>
+                                                      co.id === course.id
+                                                        ? { ...co, common: e.target.checked }
+                                                        : co,
+                                                    ),
+                                                  }
+                                                : cl,
+                                            ),
+                                          }));
+                                        }}
+                                        className="w-3 h-3 accent-[#7c3aed]"
+                                      />
+                                      <span className="text-[9px] font-bold uppercase tracking-wider text-[#7c3aed]/60">
                                         Common
                                       </span>
-                                    )}
+                                    </label>
+                                    {/* Download buttons */}
+                                    <div className="shrink-0 flex items-center gap-1 mt-0.5">
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          exportCourseTimetable(cls, course);
+                                        }}
+                                        className="flex items-center gap-0.5 border border-[#0d0d0d]/20 bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#2d2d2d] hover:bg-[#e8e4dd] transition active:translate-y-0.5"
+                                        title="Download this course's timetable (Summary + Timetable)"
+                                      >
+                                        📥 Course
+                                      </button>
+                                      {courseFaculties.length > 0 && (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            courseFaculties.forEach((f) =>
+                                              exportSingleFacultyExcel(f),
+                                            );
+                                          }}
+                                          className="flex items-center gap-0.5 border border-[#0369a1]/30 bg-[#e0f2fe] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#0369a1] hover:bg-[#bae6fd] transition active:translate-y-0.5"
+                                          title="Download faculty timetable for this course's instructor(s)"
+                                        >
+                                          👤 Faculty
+                                        </button>
+                                      )}
+                                    </div>
                                   </div>
-                                  <div className="text-[9px] text-[#2d2d2d]/50 truncate mt-0.5">
-                                    {course.faculty || <span className="italic">No faculty</span>}
-                                    {hasLTPC && (
-                                      <span className="ml-1.5 font-mono text-[#7c3aed]/70">
-                                        L{course.lectureHours ?? 0}T{course.tutorialHours ?? 0}P
-                                        {course.practicalHours ?? 0}C{course.credits ?? 0}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                                {/* Common toggle */}
-                                <label
-                                  className="shrink-0 flex items-center gap-1 cursor-pointer mt-0.5"
-                                  title="Toggle as common / combined course across classes"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={!!course.common}
-                                    onChange={(e) => {
-                                      e.stopPropagation();
-                                      setState((s) => ({
-                                        ...s,
-                                        classes: s.classes.map((cl) =>
-                                          cl.id === cls.id
-                                            ? {
-                                                ...cl,
-                                                courses: cl.courses.map((co) =>
-                                                  co.id === course.id
-                                                    ? { ...co, common: e.target.checked }
-                                                    : co,
-                                                ),
-                                              }
-                                            : cl,
-                                        ),
-                                      }));
-                                    }}
-                                    className="w-3 h-3 accent-[#7c3aed]"
-                                  />
-                                  <span className="text-[9px] font-bold uppercase tracking-wider text-[#7c3aed]/60">
-                                    Common
-                                  </span>
-                                </label>
-                                {/* Download buttons */}
-                                <div className="shrink-0 flex items-center gap-1 mt-0.5">
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      exportCourseTimetable(cls, course);
-                                    }}
-                                    className="flex items-center gap-0.5 border border-[#0d0d0d]/20 bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#2d2d2d] hover:bg-[#e8e4dd] transition active:translate-y-0.5"
-                                    title="Download this course's timetable (Summary + Timetable)"
-                                  >
-                                    📥 Course
-                                  </button>
-                                  {courseFaculties.length > 0 && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        courseFaculties.forEach((f) => exportSingleFacultyExcel(f));
-                                      }}
-                                      className="flex items-center gap-0.5 border border-[#0369a1]/30 bg-[#e0f2fe] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#0369a1] hover:bg-[#bae6fd] transition active:translate-y-0.5"
-                                      title="Download faculty timetable for this course's instructor(s)"
-                                    >
-                                      👤 Faculty
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })
+                                );
+                              })
+                            )}
+                          </div>
                         )}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+          {controlPanelTab === "common" && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={commonCourseSearch}
+                  onChange={(e) => setCommonCourseSearch(e.target.value)}
+                  placeholder="🔍 Search common courses..."
+                  className="w-full bg-white border border-[#7c3aed]/30 px-3 py-1.5 text-xs text-[#2d2d2d] placeholder:text-[#2d2d2d]/40 outline-none focus:border-[#7c3aed]"
+                />
+              </div>
+
+              {commonCourseGroups.filter((g) =>
+                g.name.toLowerCase().includes(commonCourseSearch.toLowerCase()),
+              ).length === 0 ? (
+                <div className="text-xs text-[#2d2d2d]/50 italic p-4 border-2 border-dashed border-[#7c3aed]/20 bg-white text-center">
+                  No common courses found. Toggle "Common" on any course in the All Classes tab to
+                  group them here.
+                </div>
+              ) : (
+                commonCourseGroups
+                  .filter((g) => g.name.toLowerCase().includes(commonCourseSearch.toLowerCase()))
+                  .map((group) => {
+                    const facultyNames = Array.from(group.faculties).join(", ");
+                    return (
+                      <div
+                        key={group.name}
+                        className="border-2 border-[#0369a1] bg-[#f0f9ff] p-3 shadow-[2px_2px_0_0_#0369a1] flex flex-col gap-2"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs font-bold text-[#0369a1]">{group.name}</div>
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-[#0369a1] bg-[#e0f2fe] px-1.5 py-0.5 border border-[#0369a1]/30">
+                            {group.classes.length} Classes Enrolled
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-[#0369a1]/80">
+                          <strong>Instructors:</strong> {facultyNames || "Unassigned"}
+                        </div>
+                        <div className="text-[10px] text-[#0369a1]/80 flex flex-wrap gap-1">
+                          <strong>Classes:</strong>{" "}
+                          {group.classes.map((c) => (
+                            <span
+                              key={c.classId}
+                              className="bg-white border border-[#0369a1]/20 px-1 py-0.5 text-[9px] font-semibold"
+                            >
+                              {c.className}
+                            </span>
+                          ))}
+                        </div>
+                        {/* Common Classroom Bulk Input */}
+                        <div className="flex items-center gap-2 mt-1 border-t border-[#0369a1]/20 pt-2">
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-[#0369a1] shrink-0">
+                            Shared Classroom:
+                          </span>
+                          <input
+                            type="text"
+                            defaultValue={group.classroom}
+                            placeholder="e.g. Main Auditorium"
+                            className="min-w-0 flex-1 bg-white border border-[#0369a1]/40 px-2 py-1 text-[10px] text-[#0d0d0d] font-mono outline-none focus:border-[#0369a1]"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                const val = (e.target as HTMLInputElement).value;
+                                if (val && val.trim()) {
+                                  setClassroomForCommonCourseGroup(group.name, val.trim());
+                                }
+                              }
+                            }}
+                          />
+                          <button
+                            onClick={(e) => {
+                              const input = e.currentTarget
+                                .previousElementSibling as HTMLInputElement;
+                              if (input && input.value.trim()) {
+                                setClassroomForCommonCourseGroup(group.name, input.value.trim());
+                              }
+                            }}
+                            className="shrink-0 text-[9px] font-bold uppercase px-2.5 py-1 bg-[#0369a1] text-white hover:bg-[#0284c7] transition shadow-[1px_1px_0_0_#0d0d0d]"
+                          >
+                            Apply to All Classes
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+              )}
             </div>
           )}
         </div>
@@ -7234,6 +7694,37 @@ function Index() {
           >
             Delete Class
           </button>
+        </div>
+      )}
+
+      {/* Floating Right-Side Conflict Toast Error Popups */}
+      {conflictToasts.length > 0 && (
+        <div className="fixed right-5 top-16 z-[9999] flex flex-col gap-2.5 max-w-md w-full pointer-events-none">
+          {conflictToasts.map((toastItem) => (
+            <div
+              key={toastItem.id}
+              className="pointer-events-auto flex items-start justify-between gap-3 border-2 border-[#ef4444] bg-[#fef2f2] p-3.5 text-xs text-[#991b1b] shadow-[4px_4px_0_0_#ef4444] animate-in fade-in slide-in-from-right-5"
+            >
+              <div className="flex gap-2.5">
+                <span className="text-lg leading-none shrink-0">🚨</span>
+                <div>
+                  <div className="font-extrabold uppercase tracking-wider text-[#991b1b]">
+                    Placement Blocked
+                  </div>
+                  <div className="mt-1 font-semibold leading-relaxed text-[#7f1d1d]">
+                    {toastItem.message}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => removeConflictToast(toastItem.id)}
+                className="shrink-0 text-sm font-bold text-[#991b1b] hover:text-[#7f1d1d] hover:bg-[#fee2e2] rounded px-1.5 py-0.5 transition"
+                title="Dismiss error"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>
