@@ -3326,11 +3326,16 @@ function Index() {
       return `${weekday} ${dstr}`;
     });
 
-    const HEADER = ["#", "Faculty Name", ...dateHeaders];
+    const HEADER = ["#", "Faculty Name", ...dateHeaders, "Total Free Hours"];
     const META_COL_COUNT = 2;
+    const TOTAL_COL_IDX = HEADER.length - 1;
 
     const rows: (string | number)[][] = [HEADER];
-    type CellMeta = { type: "free" } | { type: "partial"; freeHours: string } | { type: "blocked" };
+    type CellMeta =
+      | { type: "weekoff" }
+      | { type: "free" }
+      | { type: "partial"; freeCount: number }
+      | { type: "blocked" };
 
     const rowMetaList: CellMeta[][] = [];
 
@@ -3348,8 +3353,12 @@ function Index() {
 
       const row: (string | number)[] = [idx + 1, facName];
       const rowCellMeta: CellMeta[] = [];
+      let totalFreeHours = 0;
 
       workingDates.forEach((date) => {
+        const wDay = weekdayOf(date);
+        const isWeekend = wDay === 0 || wDay === 6;
+
         const freePNums: number[] = [];
 
         nonBreakSlots.forEach(({ idx: slotIdx, pNum }) => {
@@ -3372,19 +3381,31 @@ function Index() {
           }
         });
 
-        if (freePNums.length === totalNonBreak) {
-          const freeHoursStr = freePNums.join(", ");
-          row.push(freeHoursStr);
-          rowCellMeta.push({ type: "free" });
-        } else if (freePNums.length > 0) {
-          const freeHoursStr = freePNums.join(", ");
-          row.push(freeHoursStr);
-          rowCellMeta.push({ type: "partial", freeHours: freeHoursStr });
-        } else {
+        const isBusyOnWeekend = isWeekend && freePNums.length < totalNonBreak;
+
+        if (isWeekend && !isBusyOnWeekend) {
+          // Weekend day with no classes scheduled for this faculty -> Weekoff
+          row.push("Weekoff");
+          rowCellMeta.push({ type: "weekoff" });
+        } else if (freePNums.length === 0) {
+          // Fully occupied during all periods
           row.push("None");
           rowCellMeta.push({ type: "blocked" });
+        } else {
+          // Working day or working weekend with available free hours
+          const freeStr = freePNums.join(", ");
+          row.push(freeStr);
+          totalFreeHours += freePNums.length;
+          if (freePNums.length === totalNonBreak) {
+            rowCellMeta.push({ type: "free" });
+          } else {
+            rowCellMeta.push({ type: "partial", freeCount: freePNums.length });
+          }
         }
       });
+
+      // Total Free Hours column
+      row.push(totalFreeHours);
 
       rows.push(row);
       rowMetaList.push(rowCellMeta);
@@ -3395,10 +3416,12 @@ function Index() {
 
     const metaWidths = [5, 24];
     const dateWidths = workingDates.map(() => 14);
+    const totalWidth = 16;
 
     (ws as unknown as Record<string, unknown>)["!cols"] = [
       ...metaWidths.map((wch) => ({ wch })),
       ...dateWidths.map((wch) => ({ wch })),
+      { wch: totalWidth },
     ];
     (ws as unknown as Record<string, unknown>)["!rows"] = rows.map((_, i) => ({
       hpt: i === 0 ? 26 : 22,
@@ -3435,31 +3458,39 @@ function Index() {
                 color: { rgb: "111111" },
               },
             };
+          } else if (c === TOTAL_COL_IDX) {
+            // Total Free Hours column
+            cs = {
+              alignment: { horizontal: "center", vertical: "center" },
+              border: bb,
+              font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "0F172A" } },
+              fill: { patternType: "solid", fgColor: { rgb: "E2E8F0" } },
+            };
           } else {
             const dateColIdx = c - META_COL_COUNT;
             const meta = rowMetaList[r - 1]?.[dateColIdx];
 
-            if (meta?.type === "free") {
+            if (meta?.type === "weekoff") {
               cs = {
                 alignment: { horizontal: "center", vertical: "center" },
                 border: bb,
-                font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "166534" } },
-                fill: { patternType: "solid", fgColor: { rgb: "DCFCE7" } },
+                font: { name: "Calibri", sz: 11, italic: true, color: { rgb: "64748B" } },
+                fill: { patternType: "solid", fgColor: { rgb: "F8FAFC" } },
               };
-            } else if (meta?.type === "partial") {
+            } else if (meta?.type === "blocked") {
               cs = {
                 alignment: { horizontal: "center", vertical: "center" },
                 border: bb,
-                font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "991B1B" } },
-                fill: { patternType: "solid", fgColor: { rgb: "FEE2E2" } },
+                font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "334155" } },
+                fill: { patternType: "solid", fgColor: { rgb: "F1F5F9" } },
               };
             } else {
-              // blocked / 0 free hours
+              // Working day or working weekend with free hours listed
               cs = {
                 alignment: { horizontal: "center", vertical: "center" },
                 border: bb,
-                font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "7F1D1D" } },
-                fill: { patternType: "solid", fgColor: { rgb: "FECACA" } },
+                font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "0F172A" } },
+                fill: { patternType: "solid", fgColor: { rgb: "FFFFFF" } },
               };
             }
           }
@@ -6699,6 +6730,15 @@ function Index() {
           >
             👨‍🏫 Faculty Workload Summary
           </button>
+          <a
+            href="/faculty_workload_check.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 flex items-center gap-1.5 border-2 border-[#4338ca] bg-[#e0e7ff] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#4338ca] hover:bg-[#c7d2fe] transition active:translate-y-0.5 shadow-[2px_2px_0_0_#4338ca] no-underline"
+            title="Open the interactive standalone companion HTML web app for Faculty Workload Check"
+          >
+            🚀 Open Workload Check App ↗
+          </a>
         </div>
 
         {/* Body */}

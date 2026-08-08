@@ -1,0 +1,1600 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PSOD Faculty Workload</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&family=JetBrains+Mono:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --primary: #7c3aed;
+        --primary-dark: #6d28d9;
+        --primary-light: #ede9fe;
+        --primary-tint: #faf8ff;
+        --text-dark: #2d2d2d;
+        --border-dark: #0d0d0d;
+        --border-purple: rgba(124, 58, 237, 0.2);
+        --bg-page: #faf8ff;
+        --bg-white: #ffffff;
+        --color-free-bg: #dcfce7;
+        --color-free-text: #15803d;
+        --color-free-border: #86efac;
+        --color-busy-bg: #fee2e2;
+        --color-busy-text: #b91c1c;
+        --color-busy-border: #fca5a5;
+        --color-weekoff-bg: #f3f4f6;
+        --color-weekoff-text: #6b7280;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        font-family: "Inter", system-ui, sans-serif;
+      }
+
+      body {
+        background-color: var(--bg-page);
+        color: var(--text-dark);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4,
+      .font-heading {
+        font-family: "Sora", system-ui, sans-serif;
+      }
+
+      .font-mono {
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      /* Header Bar */
+      header {
+        background: var(--primary);
+        border-bottom: 2px solid var(--border-dark);
+        padding: 0.85rem 2rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: white;
+        box-shadow: 0 4px 12px rgba(124, 58, 237, 0.15);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .brand-icon {
+        width: 38px;
+        height: 38px;
+        background: white;
+        color: var(--primary);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.25rem;
+        font-weight: 800;
+        border: 2px solid var(--border-dark);
+        box-shadow: 2px 2px 0 0 var(--border-dark);
+      }
+
+      .brand-title {
+        font-size: 1.25rem;
+        font-weight: 800;
+        color: #ffffff;
+        letter-spacing: -0.02em;
+      }
+
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.5rem 1rem;
+        border-radius: 6px;
+        font-size: 0.82rem;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        border: 2px solid var(--border-dark);
+        text-decoration: none;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+
+      .btn-primary {
+        background: white;
+        color: var(--primary);
+        box-shadow: 2px 2px 0 0 var(--border-dark);
+      }
+
+      .btn-primary:hover {
+        background: var(--primary-light);
+        transform: translateY(-1px);
+      }
+
+      .btn-secondary {
+        background: var(--primary-dark);
+        color: white;
+        border-color: white;
+      }
+
+      .btn-secondary:hover {
+        background: rgba(255, 255, 255, 0.15);
+      }
+
+      /* Main Container */
+      main {
+        flex: 1;
+        padding: 1.5rem 2rem;
+        max-width: 1700px;
+        width: 100%;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+      }
+
+      /* File Status Bar */
+      .status-bar {
+        background: white;
+        border: 2px solid var(--primary);
+        border-radius: 8px;
+        padding: 0.85rem 1.25rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        box-shadow: 2px 2px 0 0 var(--primary);
+      }
+
+      .status-info {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-size: 0.85rem;
+      }
+
+      .status-badge {
+        background: var(--primary-light);
+        color: var(--primary);
+        font-weight: 700;
+        padding: 0.2rem 0.6rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        border: 1px solid var(--primary);
+      }
+
+      /* Navigation Mode Tabs */
+      .mode-nav {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: white;
+        border: 1px solid var(--border-purple);
+        padding: 0.4rem;
+        border-radius: 8px;
+        overflow-x: auto;
+      }
+
+      .mode-btn {
+        padding: 0.55rem 1.1rem;
+        border-radius: 6px;
+        font-size: 0.82rem;
+        font-weight: 700;
+        background: transparent;
+        color: var(--text-dark);
+        border: none;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        white-space: nowrap;
+      }
+
+      .mode-btn:hover {
+        background: var(--primary-light);
+        color: var(--primary-dark);
+      }
+
+      .mode-btn.active {
+        background: var(--primary);
+        color: white;
+        box-shadow: 2px 2px 0 0 var(--border-dark);
+      }
+
+      /* Filter Bar */
+      .filter-card {
+        background: white;
+        border: 1px solid var(--border-purple);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 1rem;
+        align-items: end;
+        box-shadow: 0 2px 8px rgba(124, 58, 237, 0.06);
+      }
+
+      .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+      }
+
+      .filter-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--primary);
+      }
+
+      .form-select,
+      .form-input {
+        background: white;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        color: var(--text-dark);
+        padding: 0.5rem 0.75rem;
+        font-size: 0.85rem;
+        outline: none;
+        transition: border-color 0.15s ease;
+        width: 100%;
+      }
+
+      .form-select:focus,
+      .form-input:focus {
+        border-color: var(--primary);
+        box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+      }
+
+      /* KPI Summary Row */
+      .kpi-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+      }
+
+      .kpi-card {
+        background: white;
+        border: 1px solid var(--border-purple);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        box-shadow: 2px 2px 0 0 rgba(124, 58, 237, 0.1);
+      }
+
+      .kpi-title {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--primary);
+      }
+
+      .kpi-value {
+        font-size: 1.6rem;
+        font-weight: 800;
+        color: var(--text-dark);
+        font-family: "Sora", sans-serif;
+      }
+
+      /* Main Table Section */
+      .table-card {
+        background: white;
+        border: 2px solid var(--primary);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 4px 4px 0 0 rgba(124, 58, 237, 0.15);
+      }
+
+      .table-header-bar {
+        background: var(--primary-light);
+        padding: 0.85rem 1.25rem;
+        border-bottom: 1px solid var(--border-purple);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .table-title {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: var(--primary-dark);
+      }
+
+      .table-container {
+        overflow-x: auto;
+        max-height: 68vh;
+      }
+
+      table.workload-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+        text-align: center;
+      }
+
+      table.workload-table th {
+        background: var(--primary);
+        color: white;
+        font-weight: 700;
+        padding: 0.85rem 1rem;
+        border-bottom: 2px solid var(--border-dark);
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        white-space: nowrap;
+      }
+
+      table.workload-table th.sticky-col {
+        position: sticky;
+        left: 0;
+        z-index: 30;
+        background: var(--primary);
+        text-align: left;
+      }
+
+      table.workload-table td {
+        padding: 0.75rem 0.85rem;
+        border-bottom: 1px solid #e2e8f0;
+        border-right: 1px solid #f1f5f9;
+        white-space: nowrap;
+        vertical-align: middle;
+      }
+
+      table.workload-table td.sticky-col {
+        position: sticky;
+        left: 0;
+        z-index: 10;
+        background: white;
+        text-align: left;
+        font-weight: 700;
+        border-right: 2px solid var(--primary);
+      }
+
+      table.workload-table tr:hover td.sticky-col {
+        background: var(--primary-tint);
+      }
+
+      table.workload-table tr:hover td {
+        background: rgba(124, 58, 237, 0.03);
+      }
+
+      /* Period Buttons Ribbon */
+      .period-ribbon {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .period-btn {
+        width: 32px;
+        height: 30px;
+        border-radius: 6px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        border: 1px solid transparent;
+        user-select: none;
+      }
+
+      .period-btn.free {
+        background: var(--color-free-bg);
+        color: var(--color-free-text);
+        border-color: var(--color-free-border);
+      }
+
+      .period-btn.free:hover {
+        background: #bbf7d0;
+        transform: scale(1.1);
+      }
+
+      .period-btn.busy {
+        background: var(--color-busy-bg);
+        color: var(--color-busy-text);
+        border-color: var(--color-busy-border);
+      }
+
+      .period-btn.busy:hover {
+        background: #fecaca;
+        transform: scale(1.1);
+      }
+
+      .pill-weekoff {
+        background: var(--color-weekoff-bg);
+        color: var(--color-weekoff-text);
+        font-style: italic;
+        font-size: 0.78rem;
+        padding: 0.3rem 0.75rem;
+        border-radius: 6px;
+        border: 1px solid #e5e7eb;
+      }
+
+      .pill-none {
+        background: var(--color-busy-bg);
+        color: var(--color-busy-text);
+        font-weight: 700;
+        font-size: 0.8rem;
+        padding: 0.3rem 0.75rem;
+        border-radius: 6px;
+        border: 1px solid var(--color-busy-border);
+      }
+
+      .pill-total {
+        background: var(--primary-light);
+        color: var(--primary-dark);
+        font-weight: 700;
+        padding: 0.35rem 0.75rem;
+        border-radius: 6px;
+        border: 1px solid var(--primary);
+      }
+
+      /* Class Timetable Grid Specific Cards */
+      .course-badge-card {
+        padding: 0.5rem 0.75rem;
+        border-radius: 6px;
+        border: 1px solid rgba(0, 0, 0, 0.15);
+        text-align: left;
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+        max-width: 220px;
+      }
+
+      .course-badge-title {
+        font-weight: 700;
+        font-size: 0.82rem;
+      }
+
+      .course-badge-sub {
+        font-size: 0.72rem;
+        opacity: 0.85;
+      }
+
+      /* Modal Popover */
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(13, 13, 13, 0.5);
+        backdrop-filter: blur(2px);
+        z-index: 100;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+      }
+
+      .modal-backdrop.active {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .modal-card {
+        background: white;
+        border: 2px solid var(--primary);
+        border-radius: 12px;
+        width: min(550px, 90vw);
+        padding: 1.5rem;
+        box-shadow: 6px 6px 0 0 var(--primary);
+        transform: translateY(10px);
+        transition: transform 0.2s ease;
+      }
+
+      .modal-backdrop.active .modal-card {
+        transform: translateY(0);
+      }
+
+      .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 2px solid var(--primary-light);
+        padding-bottom: 0.75rem;
+        margin-bottom: 1rem;
+      }
+
+      .modal-title {
+        font-size: 1.1rem;
+        font-weight: 800;
+        color: var(--primary-dark);
+      }
+
+      .modal-close {
+        background: var(--primary-light);
+        border: 1px solid var(--primary);
+        color: var(--primary);
+        width: 30px;
+        height: 30px;
+        border-radius: 6px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .modal-close:hover {
+        background: var(--primary);
+        color: white;
+      }
+
+      .info-box {
+        background: var(--bg-page);
+        border: 1px solid var(--border-purple);
+        border-radius: 8px;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .info-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+        font-size: 0.9rem;
+      }
+
+      .info-label {
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: var(--primary);
+        shrink: 0;
+      }
+
+      .info-val {
+        font-weight: 700;
+        color: var(--text-dark);
+        text-align: right;
+      }
+
+      footer {
+        text-align: center;
+        padding: 1.5rem;
+        color: #64748b;
+        font-size: 0.8rem;
+        border-top: 1px solid #e2e8f0;
+        margin-top: auto;
+      }
+
+      #file-input {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Header -->
+    <header>
+      <div class="brand">
+        <div class="brand-icon">P</div>
+        <div class="brand-title">PSOD Faculty Workload</div>
+      </div>
+      <div class="header-actions">
+        <a href="/" class="btn btn-secondary"> &larr; Back to Timetable </a>
+        <label for="file-input" class="btn btn-primary"> 📂 Upload .aadhi File </label>
+      </div>
+    </header>
+
+    <!-- Main Container -->
+    <main>
+      <input type="file" id="file-input" accept=".aadhi,.json" />
+
+      <!-- Loaded File Status Bar -->
+      <div class="status-bar" id="status-bar">
+        <div class="status-info">
+          <span class="status-badge" id="file-status-badge">Loaded Snapshot</span>
+          <span style="font-weight: 700" id="file-status-name">Default Timetable Schedule</span>
+          <span style="color: #64748b; font-size: 0.8rem" id="file-status-dates"
+            >(2026-07-28 to 2026-08-08)</span
+          >
+        </div>
+        <div>
+          <button
+            class="btn btn-primary"
+            onclick="document.getElementById('file-input').click()"
+            style="padding: 0.35rem 0.75rem; font-size: 0.78rem"
+          >
+            Change File
+          </button>
+        </div>
+      </div>
+
+      <!-- Multipurpose Navigation Tabs -->
+      <div class="mode-nav">
+        <button class="mode-btn active" data-mode="faculty" onclick="switchMode('faculty')">
+          👨‍🏫 Faculty Workload & Free Hours
+        </button>
+        <button class="mode-btn" data-mode="class" onclick="switchMode('class')">
+          🏫 Class Timetable Grid
+        </button>
+        <button class="mode-btn" data-mode="course" onclick="switchMode('course')">
+          📖 Course Allocations
+        </button>
+        <button class="mode-btn" data-mode="department" onclick="switchMode('department')">
+          🏢 Department Overview
+        </button>
+        <button class="mode-btn" data-mode="audit" onclick="switchMode('audit')">
+          ⚠️ Schedule Conflict Audit
+        </button>
+      </div>
+
+      <!-- Filter Toolbar -->
+      <div class="filter-card">
+        <div class="filter-group">
+          <label class="filter-label">🏢 Department</label>
+          <select id="filter-dept" class="form-select">
+            <option value="">All Departments</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label">📚 Class</label>
+          <select id="filter-class" class="form-select">
+            <option value="">All Classes</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label">👨‍🏫 Faculty</label>
+          <select id="filter-faculty" class="form-select">
+            <option value="">All Faculties</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label">📖 Course</label>
+          <select id="filter-course" class="form-select">
+            <option value="">All Courses</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label">🔍 Live Search</label>
+          <input
+            type="text"
+            id="filter-search"
+            class="form-input"
+            placeholder="Search instructor or course..."
+          />
+        </div>
+      </div>
+
+      <!-- KPI Summary Row -->
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-title">Faculties Count</div>
+          <div class="kpi-value" id="kpi-faculties">0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Total Classes</div>
+          <div class="kpi-value" id="kpi-classes">0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Active Courses</div>
+          <div class="kpi-value" id="kpi-courses">0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Overall Free Capacity</div>
+          <div class="kpi-value" id="kpi-free-pct">0%</div>
+        </div>
+      </div>
+
+      <!-- Main Workload Matrix Card -->
+      <div class="table-card">
+        <div class="table-header-bar">
+          <div class="table-title" id="table-title">
+            Faculty Free-Period Matrix (Click P1..Pn for details)
+          </div>
+          <div>
+            <button
+              class="btn btn-primary"
+              onclick="exportToCSV()"
+              style="padding: 0.35rem 0.75rem; font-size: 0.75rem"
+            >
+              📥 Export CSV
+            </button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table class="workload-table" id="workload-table">
+            <thead id="table-thead"></thead>
+            <tbody id="table-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+
+    <!-- Period Detail Modal -->
+    <div class="modal-backdrop" id="modal-backdrop" onclick="closeModal()">
+      <div class="modal-card" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <div class="modal-title" id="modal-title">Period Details</div>
+          <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div id="modal-body"></div>
+      </div>
+    </div>
+
+    <footer>PSOD Faculty Workload System &bull; Powered by Timetable Maker</footer>
+
+    <script>
+      const STORAGE_KEY = "psod_faculty_workload_loaded_file";
+
+      const SEED_STATE = {
+        filename: "Default Sample Timetable",
+        state: {
+          fromDate: "2026-07-28",
+          toDate: "2026-08-08",
+          slots: [
+            { start: "09:00", end: "09:55" },
+            { start: "09:55", end: "10:50" },
+            { start: "10:50", end: "11:10", isBreak: true },
+            { start: "11:10", end: "12:05" },
+            { start: "12:05", end: "13:00" },
+            { start: "13:00", end: "14:00", isBreak: true },
+            { start: "14:00", end: "14:55" },
+            { start: "14:55", end: "15:50" },
+          ],
+          classes: [
+            {
+              id: "k1",
+              name: "Class 1A - CS",
+              department: "Computer Science",
+              courses: [
+                {
+                  id: "c1",
+                  name: "CS101 - Intro to Programming",
+                  faculty: "Dr. Aadhithyan",
+                  classroom: "Lab 301",
+                  color: "#8b5cf6",
+                  lectureHours: 3,
+                  practicalHours: 2,
+                  credits: 4,
+                },
+                {
+                  id: "c2",
+                  name: "CS102 - Data Structures",
+                  faculty: "Prof. Sarah Jenkins",
+                  classroom: "Room 102",
+                  color: "#06b6d4",
+                  lectureHours: 3,
+                  credits: 3,
+                },
+              ],
+              grid: {
+                "2026-07-28-0": { kind: "course", courseId: "c1" },
+                "2026-07-28-1": { kind: "course", courseId: "c1" },
+                "2026-07-29-3": { kind: "course", courseId: "c2" },
+                "2026-07-30-0": { kind: "course", courseId: "c1" },
+              },
+            },
+            {
+              id: "k2",
+              name: "Class 2B - Design",
+              department: "School of Design",
+              courses: [
+                {
+                  id: "c3",
+                  name: "DES201 - Game Programming",
+                  faculty: "Dr. Aadhithyan",
+                  classroom: "Studio B",
+                  color: "#f59e0b",
+                  lectureHours: 2,
+                  practicalHours: 4,
+                  credits: 4,
+                },
+                {
+                  id: "c4",
+                  name: "DES202 - UI/UX Design",
+                  faculty: "Prof. Marcus Vance",
+                  classroom: "Lab 204",
+                  color: "#ec4899",
+                  lectureHours: 3,
+                  credits: 3,
+                },
+              ],
+              grid: {
+                "2026-07-28-3": { kind: "course", courseId: "c3" },
+                "2026-07-28-4": { kind: "course", courseId: "c3" },
+                "2026-07-31-0": { kind: "course", courseId: "c4" },
+              },
+            },
+          ],
+        },
+      };
+
+      let loadedPayload = null;
+      let appState = null;
+      let daysList = [];
+      let nonBreakSlots = [];
+      let currentMode = "faculty";
+
+      const fileInput = document.getElementById("file-input");
+
+      fileInput.addEventListener("change", (e) => {
+        if (e.target.files.length > 0) {
+          const file = e.target.files[0];
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            try {
+              const parsed = JSON.parse(evt.target.result);
+              const state = parsed.state || parsed;
+              if (!state || !Array.isArray(state.classes) || !Array.isArray(state.slots)) {
+                alert("Invalid .aadhi file structure.");
+                return;
+              }
+              loadedPayload = { filename: file.name, state };
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(loadedPayload));
+              initData();
+            } catch {
+              alert("Could not parse file. Ensure it is a valid .aadhi JSON snapshot.");
+            }
+          };
+          reader.readAsText(file);
+        }
+      });
+
+      function daysBetween(fromStr, toStr) {
+        if (!fromStr || !toStr) return [];
+        const res = [];
+        let cur = new Date(fromStr + "T00:00:00Z");
+        const end = new Date(toStr + "T00:00:00Z");
+        while (cur <= end) {
+          res.push(cur.toISOString().slice(0, 10));
+          cur.setUTCDate(cur.getUTCDate() + 1);
+        }
+        return res;
+      }
+
+      const MONTH_SHORT = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+      ];
+      const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+      function dayLabel(iso) {
+        const d = new Date(iso + "T00:00:00Z");
+        return {
+          weekday: WEEKDAY_SHORT[d.getUTCDay()] || "Sun",
+          date: `${d.getUTCDate()} ${MONTH_SHORT[d.getUTCMonth()] || "Jan"}`,
+          wDay: d.getUTCDay(),
+        };
+      }
+
+      function periodNumberFor(slotIdx, slots) {
+        let num = 0;
+        for (let i = 0; i <= slotIdx; i++) {
+          if (!slots[i]?.isBreak) num++;
+        }
+        return num;
+      }
+
+      function initData() {
+        if (!loadedPayload) {
+          const cached = localStorage.getItem(STORAGE_KEY);
+          if (cached) {
+            try {
+              loadedPayload = JSON.parse(cached);
+            } catch {
+              loadedPayload = SEED_STATE;
+            }
+          } else {
+            loadedPayload = SEED_STATE;
+          }
+        }
+
+        appState = loadedPayload.state;
+
+        document.getElementById("file-status-name").textContent =
+          loadedPayload.filename || "Uploaded .aadhi Schedule";
+        document.getElementById("file-status-dates").textContent =
+          `(${appState.fromDate} to ${appState.toDate})`;
+
+        daysList = daysBetween(appState.fromDate, appState.toDate);
+        nonBreakSlots = appState.slots
+          .map((sl, idx) => ({ sl, idx, pNum: periodNumberFor(idx, appState.slots) }))
+          .filter((s) => !s.sl.isBreak);
+
+        populateFilters();
+        renderAll();
+      }
+
+      function populateFilters() {
+        const depts = new Set();
+        const classes = new Set();
+        const faculties = new Set();
+        const courses = new Set();
+
+        appState.classes.forEach((cls) => {
+          if (cls.department) depts.add(cls.department.trim());
+          classes.add(cls.name);
+          cls.courses.forEach((c) => {
+            courses.add(c.name);
+            if (c.faculty) {
+              c.faculty
+                .split(/[,;/]+/)
+                .map((f) => f.trim())
+                .filter(Boolean)
+                .forEach((f) => faculties.add(f));
+            }
+          });
+        });
+
+        populateSelect("filter-dept", Array.from(depts).sort());
+        populateSelect("filter-class", Array.from(classes).sort());
+        populateSelect("filter-faculty", Array.from(faculties).sort());
+        populateSelect("filter-course", Array.from(courses).sort());
+
+        ["filter-dept", "filter-class", "filter-faculty", "filter-course"].forEach((id) => {
+          document.getElementById(id).addEventListener("change", renderAll);
+        });
+        document.getElementById("filter-search").addEventListener("input", renderAll);
+      }
+
+      function populateSelect(id, items) {
+        const el = document.getElementById(id);
+        const first = el.options[0];
+        el.innerHTML = "";
+        el.appendChild(first);
+        items.forEach((item) => {
+          const opt = document.createElement("option");
+          opt.value = item;
+          opt.textContent = item;
+          el.appendChild(opt);
+        });
+      }
+
+      function switchMode(mode) {
+        currentMode = mode;
+        document.querySelectorAll(".mode-btn").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.mode === mode);
+        });
+        renderAll();
+      }
+
+      function getFilteredFaculties() {
+        const deptVal = document.getElementById("filter-dept").value.toLowerCase();
+        const classVal = document.getElementById("filter-class").value.toLowerCase();
+        const facVal = document.getElementById("filter-faculty").value.toLowerCase();
+        const courseVal = document.getElementById("filter-course").value.toLowerCase();
+        const searchVal = document.getElementById("filter-search").value.toLowerCase();
+
+        const faculties = new Set();
+        appState.classes.forEach((cls) => {
+          if (deptVal && (cls.department || "").toLowerCase() !== deptVal) return;
+          if (classVal && cls.name.toLowerCase() !== classVal) return;
+
+          cls.courses.forEach((c) => {
+            if (courseVal && c.name.toLowerCase() !== courseVal) return;
+            if (c.faculty) {
+              c.faculty
+                .split(/[,;/]+/)
+                .map((f) => f.trim())
+                .filter(Boolean)
+                .forEach((f) => {
+                  if (facVal && f.toLowerCase() !== facVal) return;
+                  if (
+                    searchVal &&
+                    !f.toLowerCase().includes(searchVal) &&
+                    !c.name.toLowerCase().includes(searchVal)
+                  )
+                    return;
+                  faculties.add(f);
+                });
+            }
+          });
+        });
+        return Array.from(faculties).sort();
+      }
+
+      function renderAll() {
+        const faculties = getFilteredFaculties();
+
+        document.getElementById("kpi-faculties").textContent = faculties.length;
+        document.getElementById("kpi-classes").textContent = appState.classes.length;
+
+        let totalCourses = 0;
+        appState.classes.forEach((c) => (totalCourses += c.courses.length));
+        document.getElementById("kpi-courses").textContent = totalCourses;
+
+        let totalCap = 0;
+        let totalFreeCount = 0;
+
+        faculties.forEach((fac) => {
+          daysList.forEach((date) => {
+            const wDay = dayLabel(date).wDay;
+            if (wDay === 0 || wDay === 6) return;
+            nonBreakSlots.forEach(({ idx }) => {
+              totalCap++;
+              let isBusy = false;
+              for (const cls of appState.classes) {
+                const cell = cls.grid[`${date}-${idx}`];
+                if (cell?.kind === "course") {
+                  const crs = cls.courses.find((x) => x.id === cell.courseId);
+                  if (crs && crs.faculty) {
+                    const names = crs.faculty.split(/[,;/]+/).map((f) => f.trim().toLowerCase());
+                    if (names.includes(fac.toLowerCase())) {
+                      isBusy = true;
+                      break;
+                    }
+                  }
+                }
+              }
+              if (!isBusy) totalFreeCount++;
+            });
+          });
+        });
+
+        const freePct = totalCap > 0 ? Math.round((totalFreeCount / totalCap) * 100) : 0;
+        document.getElementById("kpi-free-pct").textContent = `${freePct}%`;
+
+        if (currentMode === "faculty") {
+          document.getElementById("table-title").textContent =
+            "Faculty Free-Period Matrix (Click P1..Pn for details)";
+          renderFacultyTable(faculties);
+        } else if (currentMode === "class") {
+          document.getElementById("table-title").textContent =
+            "Class Timetable Grid (Days x Time Slots)";
+          renderClassTimetable();
+        } else if (currentMode === "course") {
+          document.getElementById("table-title").textContent =
+            "Course Allocation & Session Placement Overview";
+          renderCourseOverview();
+        } else if (currentMode === "department") {
+          document.getElementById("table-title").textContent =
+            "Department Workload & Free Capacity Summary";
+          renderDepartmentOverview();
+        } else if (currentMode === "audit") {
+          document.getElementById("table-title").textContent =
+            "Schedule Conflict Audit & Session Deficiency Check";
+          renderConflictAudit();
+        }
+      }
+
+      function renderFacultyTable(faculties) {
+        const thead = document.getElementById("table-thead");
+        const tbody = document.getElementById("table-tbody");
+
+        thead.innerHTML = "";
+        tbody.innerHTML = "";
+
+        if (faculties.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="${daysList.length + 3}" style="padding: 3rem; text-align: center; color: #64748b;">No matching faculties found.</td></tr>`;
+          return;
+        }
+
+        const trH = document.createElement("tr");
+        trH.innerHTML = `
+        <th class="sticky-col">#</th>
+        <th class="sticky-col" style="left: 45px;">Faculty Name</th>
+        ${daysList
+          .map((d) => {
+            const { weekday, date } = dayLabel(d);
+            return `<th>${weekday}<br/><span style="font-size: 0.7rem; font-weight: normal; opacity: 0.85;">${date}</span></th>`;
+          })
+          .join("")}
+        <th>Total Free Hours</th>
+      `;
+        thead.appendChild(trH);
+
+        faculties.forEach((facName, idx) => {
+          const facLower = facName.toLowerCase();
+          const tr = document.createElement("tr");
+
+          let totalFree = 0;
+          let cellsHtml = "";
+
+          daysList.forEach((date) => {
+            const wDay = dayLabel(date).wDay;
+            const isWeekend = wDay === 0 || wDay === 6;
+
+            const slotStates = [];
+
+            nonBreakSlots.forEach(({ idx: slotIdx, pNum, sl }) => {
+              let busyCourse = null;
+              let busyClass = null;
+
+              for (const cls of appState.classes) {
+                const cell = cls.grid[`${date}-${slotIdx}`];
+                if (cell?.kind === "course") {
+                  const crs = cls.courses.find((x) => x.id === cell.courseId);
+                  if (crs && crs.faculty) {
+                    const names = crs.faculty.split(/[,;/]+/).map((f) => f.trim().toLowerCase());
+                    if (names.includes(facLower)) {
+                      busyCourse = crs;
+                      busyClass = cls;
+                      break;
+                    }
+                  }
+                }
+              }
+
+              const isFree = !busyCourse;
+              if (isFree) totalFree++;
+
+              slotStates.push({
+                pNum,
+                slotIdx,
+                time: `${sl.start} - ${sl.end}`,
+                isFree,
+                course: busyCourse,
+                cls: busyClass,
+              });
+            });
+
+            const hasBusy = slotStates.some((s) => !s.isFree);
+
+            if (isWeekend && !hasBusy) {
+              cellsHtml += `<td><span class="pill-weekoff">Weekoff</span></td>`;
+            } else if (!slotStates.some((s) => s.isFree)) {
+              cellsHtml += `<td><span class="pill-none">None</span></td>`;
+            } else {
+              let btnsHtml = slotStates
+                .map((s) => {
+                  const btnClass = s.isFree ? "free" : "busy";
+                  const clickData = {
+                    facName,
+                    date,
+                    pNum: s.pNum,
+                    time: s.time,
+                    isFree: s.isFree,
+                    courseName: s.course ? s.course.name : "",
+                    className: s.cls ? s.cls.name : "",
+                    classroom: s.course ? s.course.classroom || "Not specified" : "",
+                  };
+                  const jsonStr = JSON.stringify(clickData).replace(/"/g, "&quot;");
+                  return `<button class="period-btn ${btnClass}" onclick="openPeriodModal(${jsonStr})" title="P${s.pNum} (${s.time}) — ${s.isFree ? "Free" : "Occupied"}">P${s.pNum}</button>`;
+                })
+                .join("");
+
+              cellsHtml += `<td><div class="period-ribbon">${btnsHtml}</div></td>`;
+            }
+          });
+
+          tr.innerHTML = `
+          <td class="sticky-col">${idx + 1}</td>
+          <td class="sticky-col" style="left: 45px;">${facName}</td>
+          ${cellsHtml}
+          <td><span class="pill-total">${totalFree} hrs</span></td>
+        `;
+          tbody.appendChild(tr);
+        });
+      }
+
+      function renderClassTimetable() {
+        const thead = document.getElementById("table-thead");
+        const tbody = document.getElementById("table-tbody");
+
+        thead.innerHTML = "";
+        tbody.innerHTML = "";
+
+        const selectedClassVal = document.getElementById("filter-class").value;
+        const targetClass =
+          appState.classes.find((c) => c.name === selectedClassVal) || appState.classes[0];
+
+        if (!targetClass) {
+          tbody.innerHTML = `<tr><td style="padding: 3rem; text-align: center;">No class selected.</td></tr>`;
+          return;
+        }
+
+        // Header: Day/Date + All slots
+        const trH = document.createElement("tr");
+        trH.innerHTML = `
+        <th class="sticky-col">Date & Day (${targetClass.name})</th>
+        ${appState.slots.map((s, i) => `<th>${s.isBreak ? "Break" : `P${periodNumberFor(i, appState.slots)}`}<br/><span style="font-size:0.7rem; font-weight:normal; opacity:0.85;">${s.start}-${s.end}</span></th>`).join("")}
+      `;
+        thead.appendChild(trH);
+
+        daysList.forEach((date) => {
+          const { weekday, date: dstr, wDay } = dayLabel(date);
+          const isWeekend = wDay === 0 || wDay === 6;
+
+          let cellsHtml = "";
+          let hasAnyCourse = false;
+
+          appState.slots.forEach((sl, slotIdx) => {
+            if (sl.isBreak) {
+              cellsHtml += `<td style="background: #fef3c7; color: #92400e; font-style: italic; font-weight: 600;">Break</td>`;
+              return;
+            }
+
+            const cell = targetClass.grid[`${date}-${slotIdx}`];
+            if (cell?.kind === "course") {
+              const course = targetClass.courses.find((x) => x.id === cell.courseId);
+              if (course) {
+                hasAnyCourse = true;
+                const bg = course.color || "#8b5cf6";
+                cellsHtml += `<td>
+                <div class="course-badge-card" style="background: ${bg}15; border-color: ${bg}; color: var(--text-dark);">
+                  <div class="course-badge-title">${course.name}</div>
+                  <div class="course-badge-sub">👤 ${course.faculty || "Unassigned"}</div>
+                  <div class="course-badge-sub">🚪 ${course.classroom || "No Room"}</div>
+                </div>
+              </td>`;
+              } else {
+                cellsHtml += `<td style="color: #94a3b8;">-</td>`;
+              }
+            } else if (cell?.kind === "blocked") {
+              cellsHtml += `<td style="background: #fee2e2; color: #991b1b; font-weight: 600;">Blocked</td>`;
+            } else {
+              cellsHtml += `<td style="color: var(--color-free-text); font-weight: 600;">Free</td>`;
+            }
+          });
+
+          if (isWeekend && !hasAnyCourse) return;
+
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+          <td class="sticky-col"><strong>${weekday}</strong>, ${dstr}</td>
+          ${cellsHtml}
+        `;
+          tbody.appendChild(tr);
+        });
+      }
+
+      function renderCourseOverview() {
+        const thead = document.getElementById("table-thead");
+        const tbody = document.getElementById("table-tbody");
+
+        thead.innerHTML = "";
+        tbody.innerHTML = "";
+
+        const trH = document.createElement("tr");
+        trH.innerHTML = `
+        <th class="sticky-col">#</th>
+        <th class="sticky-col" style="left: 45px;">Course Name</th>
+        <th>Class Name</th>
+        <th>Department</th>
+        <th>Instructor</th>
+        <th>L-T-P-C Structure</th>
+        <th>Target Periods</th>
+        <th>Placed Periods</th>
+        <th>Remaining / Missing</th>
+      `;
+        thead.appendChild(trH);
+
+        let idx = 0;
+        appState.classes.forEach((cls) => {
+          cls.courses.forEach((c) => {
+            idx++;
+            const L = c.lectureHours || 0;
+            const T = c.tutorialHours || 0;
+            const P = c.practicalHours || 0;
+            const C = c.credits || 0;
+
+            const targetWeekly = L + T + P > 0 ? L + T + P : c.weeklyPeriods || 0;
+            const totalTarget = c.totalSessions || targetWeekly * 15;
+
+            let placed = 0;
+            daysList.forEach((date) => {
+              nonBreakSlots.forEach(({ idx: slotIdx }) => {
+                const cell = cls.grid[`${date}-${slotIdx}`];
+                if (cell?.kind === "course" && cell.courseId === c.id) placed++;
+              });
+            });
+
+            const missing = Math.max(0, totalTarget - placed);
+
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+            <td class="sticky-col">${idx}</td>
+            <td class="sticky-col" style="left: 45px;"><strong>${c.name}</strong></td>
+            <td>${cls.name}</td>
+            <td>${cls.department || "General"}</td>
+            <td>${c.faculty || "Unassigned"}</td>
+            <td class="font-mono">${L}-${T}-${P}-${C}</td>
+            <td><strong>${totalTarget}</strong></td>
+            <td style="color: var(--color-free-text); font-weight: 700;">${placed}</td>
+            <td style="color: ${missing > 0 ? "var(--color-busy-text)" : "inherit"}; font-weight: 700;">${missing > 0 ? missing : "Complete"}</td>
+          `;
+            tbody.appendChild(tr);
+          });
+        });
+      }
+
+      function renderDepartmentOverview() {
+        const thead = document.getElementById("table-thead");
+        const tbody = document.getElementById("table-tbody");
+
+        thead.innerHTML = "";
+        tbody.innerHTML = "";
+
+        const trH = document.createElement("tr");
+        trH.innerHTML = `
+        <th class="sticky-col">#</th>
+        <th class="sticky-col" style="left: 45px;">Department Name</th>
+        <th>Total Classes</th>
+        <th>Total Subjects</th>
+        <th>Assigned Instructors</th>
+        <th>Target Periods</th>
+        <th>Placed Periods</th>
+        <th>Free Capacity %</th>
+      `;
+        thead.appendChild(trH);
+
+        const deptMap = new Map();
+        appState.classes.forEach((cls) => {
+          const dept = cls.department || "Unassigned";
+          const item = deptMap.get(dept) || {
+            classes: [],
+            coursesCount: 0,
+            faculties: new Set(),
+            placed: 0,
+            target: 0,
+          };
+          item.classes.push(cls);
+          item.coursesCount += cls.courses.length;
+
+          cls.courses.forEach((c) => {
+            if (c.faculty) c.faculty.split(/[,;/]+/).forEach((f) => item.faculties.add(f.trim()));
+            const L = c.lectureHours || 0;
+            const T = c.tutorialHours || 0;
+            const P = c.practicalHours || 0;
+            item.target += (L + T + P > 0 ? L + T + P : c.weeklyPeriods || 0) * 15;
+          });
+
+          daysList.forEach((date) => {
+            nonBreakSlots.forEach(({ idx: slotIdx }) => {
+              const cell = cls.grid[`${date}-${slotIdx}`];
+              if (cell?.kind === "course") item.placed++;
+            });
+          });
+
+          deptMap.set(dept, item);
+        });
+
+        let idx = 0;
+        deptMap.forEach((data, deptName) => {
+          idx++;
+          const freePct =
+            data.target > 0
+              ? Math.max(0, Math.round(((data.target - data.placed) / data.target) * 100))
+              : 100;
+
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+          <td class="sticky-col">${idx}</td>
+          <td class="sticky-col" style="left: 45px;"><strong>${deptName}</strong></td>
+          <td>${data.classes.length}</td>
+          <td>${data.coursesCount}</td>
+          <td>${data.faculties.size}</td>
+          <td>${data.target}</td>
+          <td style="font-weight: 700; color: var(--color-free-text);">${data.placed}</td>
+          <td><span class="pill-total">${freePct}%</span></td>
+        `;
+          tbody.appendChild(tr);
+        });
+      }
+
+      function renderConflictAudit() {
+        const thead = document.getElementById("table-thead");
+        const tbody = document.getElementById("table-tbody");
+
+        thead.innerHTML = "";
+        tbody.innerHTML = "";
+
+        const trH = document.createElement("tr");
+        trH.innerHTML = `
+        <th class="sticky-col">Audit Issue Type</th>
+        <th>Date & Day</th>
+        <th>Period / Time</th>
+        <th>Faculty / Course Involved</th>
+        <th>Classes Affected</th>
+        <th>Status</th>
+      `;
+        thead.appendChild(trH);
+
+        const conflicts = [];
+
+        // Check double-booking conflicts
+        daysList.forEach((date) => {
+          nonBreakSlots.forEach(({ idx: slotIdx, pNum, sl }) => {
+            const facMap = new Map();
+            appState.classes.forEach((cls) => {
+              const cell = cls.grid[`${date}-${slotIdx}`];
+              if (cell?.kind === "course") {
+                const crs = cls.courses.find((x) => x.id === cell.courseId);
+                if (crs && crs.faculty) {
+                  const names = crs.faculty.split(/[,;/]+/).map((f) => f.trim());
+                  names.forEach((fac) => {
+                    const list = facMap.get(fac.toLowerCase()) || [];
+                    list.push({ facName: fac, clsName: cls.name, courseName: crs.name });
+                    facMap.set(fac.toLowerCase(), list);
+                  });
+                }
+              }
+            });
+
+            facMap.forEach((list) => {
+              if (list.length > 1) {
+                conflicts.push({
+                  type: "Double Booking Conflict",
+                  date,
+                  pNum,
+                  time: `${sl.start} - ${sl.end}`,
+                  facName: list[0].facName,
+                  classes: list.map((l) => `${l.clsName} (${l.courseName})`).join(", "),
+                });
+              }
+            });
+          });
+        });
+
+        if (conflicts.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="6" style="padding: 3rem; text-align: center; color: var(--color-free-text); font-weight: 700;">✅ Perfect Schedule! No faculty double-booking conflicts detected in this .aadhi snapshot.</td></tr>`;
+          return;
+        }
+
+        conflicts.forEach((item) => {
+          const { weekday, date: dstr } = dayLabel(item.date);
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+          <td class="sticky-col" style="color: var(--color-busy-text); font-weight: 700;">⚠️ ${item.type}</td>
+          <td>${weekday}, ${dstr} (${item.date})</td>
+          <td class="font-mono">P${item.pNum} (${item.time})</td>
+          <td><strong>${item.facName}</strong></td>
+          <td>${item.classes}</td>
+          <td><span class="pill-none">Action Required</span></td>
+        `;
+          tbody.appendChild(tr);
+        });
+      }
+
+      function openPeriodModal(data) {
+        const { weekday, date: dstr } = dayLabel(data.date);
+        document.getElementById("modal-title").textContent = `Period P${data.pNum} Details`;
+
+        let bodyHtml = `
+        <div class="info-box">
+          <div class="info-row">
+            <span class="info-label">Instructor</span>
+            <span class="info-val">${data.facName}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Date & Day</span>
+            <span class="info-val">${weekday}, ${dstr} (${data.date})</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Time Slot</span>
+            <span class="info-val font-mono">${data.time}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Status</span>
+            <span class="info-val" style="color: ${data.isFree ? "var(--color-free-text)" : "var(--color-busy-text)"};">
+              ${data.isFree ? "🟢 FREE (Available for assignment)" : "🔴 OCCUPIED"}
+            </span>
+          </div>
+      `;
+
+        if (!data.isFree) {
+          bodyHtml += `
+          <div style="border-top: 1px solid #e2e8f0; padding-top: 0.75rem; margin-top: 0.25rem;"></div>
+          <div class="info-row">
+            <span class="info-label">Course</span>
+            <span class="info-val" style="color: var(--primary-dark);">${data.courseName}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Class</span>
+            <span class="info-val">${data.className}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Classroom / Room</span>
+            <span class="info-val">${data.classroom}</span>
+          </div>
+        `;
+        }
+
+        bodyHtml += `</div>`;
+        document.getElementById("modal-body").innerHTML = bodyHtml;
+        document.getElementById("modal-backdrop").classList.add("active");
+      }
+
+      function closeModal() {
+        document.getElementById("modal-backdrop").classList.remove("active");
+      }
+
+      function exportToCSV() {
+        const faculties = getFilteredFaculties();
+        if (faculties.length === 0) return;
+
+        let csv = [
+          "#,Faculty Name," +
+            daysList.map((d) => dayLabel(d).weekday + " " + dayLabel(d).date).join(",") +
+            ",Total Free Hours",
+        ];
+
+        faculties.forEach((facName, idx) => {
+          const facLower = facName.toLowerCase();
+          let totalFree = 0;
+          let row = [`"${idx + 1}"`, `"${facName}"`];
+
+          daysList.forEach((date) => {
+            const wDay = dayLabel(date).wDay;
+            const isWeekend = wDay === 0 || wDay === 6;
+            const freePNums = [];
+
+            nonBreakSlots.forEach(({ idx: slotIdx, pNum }) => {
+              let isBusy = false;
+              for (const cls of appState.classes) {
+                const cell = cls.grid[`${date}-${slotIdx}`];
+                if (cell?.kind === "course") {
+                  const crs = cls.courses.find((x) => x.id === cell.courseId);
+                  if (crs && crs.faculty) {
+                    const names = crs.faculty.split(/[,;/]+/).map((f) => f.trim().toLowerCase());
+                    if (names.includes(facLower)) {
+                      isBusy = true;
+                      break;
+                    }
+                  }
+                }
+              }
+              if (!isBusy) freePNums.push(pNum);
+            });
+
+            const isBusyOnWeekend = isWeekend && freePNums.length < nonBreakSlots.length;
+
+            if (isWeekend && !isBusyOnWeekend) {
+              row.push('"Weekoff"');
+            } else if (freePNums.length === 0) {
+              row.push('"None"');
+            } else {
+              totalFree += freePNums.length;
+              row.push(`"${freePNums.join(", ")}"`);
+            }
+          });
+
+          row.push(`"${totalFree}"`);
+          csv.push(row.join(","));
+        });
+
+        const blob = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `psod_faculty_workload_${appState.fromDate}_to_${appState.toDate}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      window.addEventListener("DOMContentLoaded", initData);
+    </script>
+  </body>
+</html>
